@@ -190,20 +190,31 @@ async function readRotaFile(rotationId,file){
   // Use the best-matching sheet, never silently combine unrelated worksheets.
   candidates.sort((a,b)=>(b.matched?1:0)-(a.matched?1:0)||b.rows.length-a.rows.length);
   const chosen=candidates[0];
-  const missing=chosen.rows.filter(x=>!x.range);
-  if(missing.length){
-   const codes=[...new Set(missing.map(x=>x.code))].slice(0,8).join(", ");
-   throw Error("Found "+chosen.rows.length+" possible assignments in worksheet '"+chosen.sheet+"', but "+missing.length+" have no verified start/end times. ShiftMate will not invent shift times. The next importer update needs a shift-code mapping step for: "+codes+".");
-  }
-  const unique=[...new Map(chosen.rows.map(x=>[x.date+"|"+x.code+"|"+x.range.start+"|"+x.range.end,x])).values()];
-  previewShifts=unique.map(x=>({shift_date:x.date,shift_type:x.code,start_time:x.range.start,end_time:x.range.end,ward:x.ward}));
+  const unique=[...new Map(chosen.rows.map(x=>[x.date+"|"+x.code+"|"+(x.range?.start||"")+"|"+(x.range?.end||""),x])).values()];
+  previewShifts=unique.map(x=>({shift_date:x.date,shift_type:x.code,start_time:x.range?.start||"",end_time:x.range?.end||"",ward:x.ward}));
   if(!previewShifts.length)throw Error("The matching worksheet did not contain any working shifts for "+(profile.rota_matching_name||profile.full_name)+".");
-  selectedFile=file;feedback.classList.add("success");feedback.textContent="Found "+previewShifts.length+" possible shift(s) in '"+chosen.sheet+"'. Review the preview before importing.";
-  $("previewArea").innerHTML='<div class="small muted" style="margin:10px 0">Preview · '+esc(chosen.sheet)+'</div>'+previewShifts.slice(0,8).map(x=>'<div class="note small"><b>'+fmtDate(x.shift_date)+'</b> · '+esc(x.shift_type)+' · '+esc(x.start_time.slice(0,5))+'–'+esc(x.end_time.slice(0,5))+'</div>').join("")+(previewShifts.length>8?'<div class="small muted">and '+(previewShifts.length-8)+' more…</div>':"");
+  selectedFile=file;
+  const unresolved=[...new Set(previewShifts.filter(x=>!x.start_time||!x.end_time).map(x=>x.shift_type))];
+  feedback.classList.add("success");
+  feedback.textContent="Found "+previewShifts.length+" possible shift(s) in '"+chosen.sheet+"'. "+(unresolved.length?"Please assign times to the shift codes below before importing.":"Review the preview before importing.");
+  const codeFields=unresolved.map((code,i)=>'<div class="card" style="padding:12px;margin:8px 0"><b>'+esc(code)+'</b><div class="grid" style="grid-template-columns:1fr 1fr;gap:8px"><div class="field"><label>Start time</label><input type="time" id="codeStart'+i+'"></div><div class="field"><label>End time</label><input type="time" id="codeEnd'+i+'"></div></div><input type="hidden" id="codeValue'+i+'" value="'+esc(code)+'"></div>').join("");
+  $("previewArea").innerHTML=(unresolved.length?'<div class="small muted" style="margin:12px 0">Set the times for each shift code. These times will be applied to all matching shifts in this import.</div>'+codeFields:'')+'<div class="small muted" style="margin:10px 0">Preview · '+esc(chosen.sheet)+'</div>'+previewShifts.slice(0,12).map(x=>'<div class="note small"><b>'+fmtDate(x.shift_date)+'</b> · '+esc(x.shift_type)+' · '+(x.start_time?esc(x.start_time.slice(0,5))+'–'+esc(x.end_time.slice(0,5)):'<i>Times to be assigned</i>')+'</div>').join("")+(previewShifts.length>12?'<div class="small muted">and '+(previewShifts.length-12)+' more…</div>':"");
   $("confirmImport").disabled=false;
- }catch(e){feedback.classList.add("error");feedback.textContent=e.message;previewShifts=[];$("confirmImport").disabled=true}
+
 }
-async function confirmImport(id){if(!previewShifts.length)return;const btn=$("confirmImport");btn.disabled=true;btn.textContent="Importing…";try{const {data,error}=await sb.rpc("confirm_rota_import",{p_rotation_id:id,p_filename:selectedFile.name,p_shifts:previewShifts});if(error)throw error;closeModal();await loadData();navigate("rota");alert("Import complete: "+(data.imported_count||0)+" added/updated, "+(data.duplicate_count||0)+" duplicates skipped.")}catch(e){alert("Import failed: "+e.message);btn.disabled=false;btn.textContent="Confirm import"}}
+async function confirmImport(id){
+ if(!previewShifts.length)return;
+ const btn=$("confirmImport");btn.disabled=true;btn.textContent="Importing…";
+ try{
+  const unresolved=[...new Set(previewShifts.filter(x=>!x.start_time||!x.end_time).map(x=>x.shift_type))];
+  const mappings={};
+  unresolved.forEach((code,i)=>{const start=$("codeStart"+i)?.value||"",end=$("codeEnd"+i)?.value||"";if(!start||!end)throw Error("Enter both start and end times for shift code "+code+".");mappings[code]={start_time:start+":00",end_time:end+":00"}});
+  const payload=previewShifts.map(x=>({...x,...(mappings[x.shift_type]||{})}));
+  const {data,error}=await sb.rpc("confirm_rota_import",{p_rotation_id:id,p_filename:selectedFile.name,p_shifts:payload});
+  if(error)throw error;
+  closeModal();await loadData();navigate("rota");alert("Import complete: "+(data.imported_count||0)+" added/updated, "+(data.duplicate_count||0)+" duplicates skipped.");
+ }catch(e){alert("Import failed: "+e.message);btn.disabled=false;btn.textContent="Confirm import"}
+}
 async function openShift(id){const s=shifts.find(x=>x.id===id);if(!s)return;const rot=rotations.find(r=>r.id===s.rotation_id);modal("Shift details",'<div class="notice">'+esc(rot?.specialty||"Rotation")+'</div><h3 style="margin:12px 0 4px">'+esc(s.shift_type)+'</h3><div class="muted">'+fmtDate(s.shift_date)+' · '+esc(s.start_time.slice(0,5))+'–'+esc(s.end_time.slice(0,5))+'</div><p>'+esc(s.ward)+'</p><div class="section-head"><h2>Private notes</h2><span class="small muted">Only you can see these</span></div><div id="notesList">Loading notes…</div><div class="field"><label>Add a note</label><input id="newNote" placeholder="Write a reminder or handover note…"></div><button class="btn" onclick="addNote(\''+id+'\')">Add note</button>','<button class="btn secondary" onclick="closeModal()">Close</button>');await loadNotes(id)}
 async function loadNotes(id){const q=await sb.from("shift_notes").select("*").eq("shift_id",id).eq("user_id",user.id).order("created_at");if(q.error){$("notesList").textContent=q.error.message;return}$("notesList").innerHTML=q.data.length?q.data.map(n=>'<div class="note"><div id="noteText'+n.id+'">'+esc(n.body)+'</div><div class="note-actions"><button class="btn ghost small" onclick="editNote(\''+n.id+'\',\''+id+'\')">Edit</button><button class="btn ghost small" onclick="deleteNote(\''+n.id+'\',\''+id+'\')">Delete</button></div></div>').join(""):'<div class="small muted">No notes yet. Add your first note below.</div>'}
 async function addNote(id){const body=$("newNote").value.trim();if(!body)return;const q=await sb.from("shift_notes").insert({user_id:user.id,shift_id:id,body});if(q.error)return alert(q.error.message);$("newNote").value="";await loadNotes(id)}
