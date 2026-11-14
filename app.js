@@ -107,7 +107,7 @@ function rotaPersonMatch(raw,selected){
 }
 function inspectRotaWorkbook(wb){
  const sheets=[];
- const ignored=new Set(["off","0ff","a l","s l","annual leave","study leave","sick leave","day","night","oncall","theatre","sdt","nwd","b h","bank holiday","rest","nil","none","monday","tuesday","wednesday","thursday","friday","saturday","sunday","mon","tue","wed","thu","fri","sat","sun"]);
+ const ignored=new Set(["off","0ff","a l","s l","annual leave","study leave","sick leave","day","night","oncall","theatre","sdt","nwd","b h","bank holiday","rest","nil","none","weekday","weekdays","weekend","weekends","monday","tuesday","wednesday","thursday","friday","saturday","sunday","mon","tue","wed","thu","fri","sat","sun"]);
  for(const name of wb.SheetNames){
   const grid=XLSX.utils.sheet_to_json(wb.Sheets[name],{header:1,defval:"",raw:true});
   const width=Math.max(0,...grid.map(r=>r.length));
