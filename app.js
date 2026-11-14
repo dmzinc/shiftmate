@@ -142,7 +142,7 @@ function inspectRotaWorkbook(wb){
     const key=normalName(raw);
     if(raw.length<6||ignored.has(key)||!/[a-z]{2,}.*[a-z]{2,}/i.test(raw))continue;
     if(/^(FY|SHO|ST\d|GI |UGI|LGI|NHS|GENERAL|AUG|DEC|APR|FEB|MON|TUE|WED|THU|FRI)/i.test(raw))continue;
-    if(/\b(?:on.call|ward cover|clerking|roster|rota|weekend|week.days?|staff|name|date|days?|working|theatre|bank.hol)\b/i.test(raw))continue;
+    if(/\b(?:on.call|ward cover|clerking|roster|rota|weekends?|week.days?|staff|name|date|days?|working|theatre|bank.hol)\b/i.test(raw))continue;
     staffColumns.set(raw,c);people.set(raw,(people.get(raw)||0)+sample.length);
     break;
    }
@@ -200,7 +200,7 @@ function buildSelectedRotaPreview(){
  feedback.classList.remove("error");feedback.classList.add("success");
  feedback.textContent="Found "+previewShifts.length+" assignment(s) for "+person+" in '"+sheet.name+"'. Review and add any missing shift times.";
  const codeFields=unresolved.map((code,i)=>'<div class="card" style="padding:12px;margin:8px 0"><b>'+esc(code)+'</b><div class="grid" style="grid-template-columns:1fr 1fr;gap:8px"><div class="field"><label>Start time</label><input type="time" id="codeStart'+i+'"></div><div class="field"><label>End time</label><input type="time" id="codeEnd'+i+'"></div></div></div>').join("");
- $("previewArea").innerHTML='<div class="field"><label>Worksheet</label><select id="rotaSheetChoice" onchange="onRotaChoiceChange()">'+state.sheets.map(x=>'<option value="'+esc(x.name)+'" '+(x.name===sheet.name?'selected':'')+'>'+esc(x.name)+'</option>').join("")+'</select></div><div class="field"><label>Doctor / staff member</label><select id="rotaPersonChoice" onchange="onRotaChoiceChange()">'+sheet.people.map(x=>'<option value="'+esc(x[0])+'" '+(x[0]===person?'selected':'')+'>'+esc(x[0])+'</option>').join("")+'</select></div>'+(unresolved.length?'<div class="small muted">Add times for duties where the workbook does not provide them. You can leave both blank and edit the shift later.</div>'+codeFields:"")+'<div class="small muted" style="margin:10px 0">Preview · '+esc(sheet.name)+' · '+esc(person)+'</div>'+previewShifts.slice(0,15).map(x=>'<div class="note small"><b>'+fmtDate(x.shift_date)+'</b> · '+esc(x.shift_type)+' · '+(x.start_time?esc(x.start_time.slice(0,5))+'–'+esc(x.end_time.slice(0,5)):'<i>Time not set</i>')+'</div>').join("")+(previewShifts.length>15?'<div class="small muted">and '+(previewShifts.length-15)+' more…</div>':"");
+ $("previewArea").innerHTML='<div class="field"><label>Worksheet</label><select id="rotaSheetChoice" onchange="onRotaChoiceChange()">'+state.sheets.map(x=>'<option value="'+esc(x.name)+'" '+(x.name===sheet.name?'selected':'')+'>'+esc(x.name)+'</option>').join("")+'</select></div><div class="field"><label>Doctor / staff member</label><select id="rotaPersonChoice" onchange="onRotaChoiceChange()"><option value="" disabled '+(person?'':'selected')+'>Select staff member</option>'+sheet.people.map(x=>'<option value="'+esc(x[0])+'" '+(x[0]===person?'selected':'')+'>'+esc(x[0])+'</option>').join("")+'</select></div>'+(unresolved.length?'<div class="small muted">Add times for duties where the workbook does not provide them. You can leave both blank and edit the shift later.</div>'+codeFields:"")+'<div class="small muted" style="margin:10px 0">Preview · '+esc(sheet.name)+' · '+esc(person)+'</div>'+previewShifts.slice(0,15).map(x=>'<div class="note small"><b>'+fmtDate(x.shift_date)+'</b> · '+esc(x.shift_type)+' · '+(x.start_time?esc(x.start_time.slice(0,5))+'–'+esc(x.end_time.slice(0,5)):'<i>Time not set</i>')+'</div>').join("")+(previewShifts.length>15?'<div class="small muted">and '+(previewShifts.length-15)+' more…</div>':"");
  $("confirmImport").disabled=false;
 }
 function onRotaChoiceChange(){
@@ -214,13 +214,13 @@ function onRotaChoiceChange(){
   $("previewArea").innerHTML='<div class="field"><label>Worksheet</label><select id="rotaSheetChoice" onchange="onRotaChoiceChange()">'+state.sheets.map(x=>'<option value="'+esc(x.name)+'">'+esc(x.name)+'</option>').join("")+'</select></div><p>No staff names detected on this worksheet.</p>';
   $("confirmImport").disabled=true;return;
  }
- const person=sheet.people.some(x=>x[0]===current)?current:(sheet.people.find(x=>rotaPersonMatch(x[0],profile.rota_matching_name||profile.full_name))?.[0]||sheet.people[0][0]);
+ const person=sheet.people.some(x=>x[0]===current)?current:(sheet.people.find(x=>rotaPersonMatch(x[0],profile.rota_matching_name||profile.full_name))?.[0]||"");
  buildSelectedRotaPreviewFor(sheet.name,person);
 }
 function buildSelectedRotaPreviewFor(sheetName,person){
  const state=rotaImportState;if(!state)return;
  const sheet=state.sheets.find(x=>x.name===sheetName);if(!sheet)return;
- $("previewArea").innerHTML='<div class="field"><label>Worksheet</label><select id="rotaSheetChoice" onchange="onRotaChoiceChange()">'+state.sheets.map(x=>'<option value="'+esc(x.name)+'" '+(x.name===sheetName?'selected':'')+'>'+esc(x.name)+'</option>').join("")+'</select></div><div class="field"><label>Doctor / staff member</label><select id="rotaPersonChoice" onchange="onRotaChoiceChange()">'+sheet.people.map(x=>'<option value="'+esc(x[0])+'" '+(x[0]===person?'selected':'')+'>'+esc(x[0])+'</option>').join("")+'</select></div>';
+ $("previewArea").innerHTML='<div class="field"><label>Worksheet</label><select id="rotaSheetChoice" onchange="onRotaChoiceChange()">'+state.sheets.map(x=>'<option value="'+esc(x.name)+'" '+(x.name===sheetName?'selected':'')+'>'+esc(x.name)+'</option>').join("")+'</select></div><div class="field"><label>Doctor / staff member</label><select id="rotaPersonChoice" onchange="onRotaChoiceChange()"><option value="" disabled '+(person?'':'selected')+'>Select staff member</option>'+sheet.people.map(x=>'<option value="'+esc(x[0])+'" '+(x[0]===person?'selected':'')+'>'+esc(x[0])+'</option>').join("")+'</select></div>';
  buildSelectedRotaPreview();
 }
 async function readRotaFile(rotationId,file){
@@ -242,14 +242,14 @@ async function readRotaFile(rotationId,file){
    if(score>bestScore){bestScore=score;selectedSheet=sh;selectedPerson=person}
   }
   if(!selectedSheet)selectedSheet=sheets.find(x=>x.people.length)||sheets[0];
-  if(!selectedPerson)selectedPerson=selectedSheet.people[0]?.[0]||"";
+  if(!selectedPerson)selectedPerson="";
   if(!selectedPerson){
    feedback.classList.add("error");feedback.textContent="We found dated worksheets but could not identify staff names. Choose a worksheet with staff assignments or add shifts manually.";
    $("previewArea").innerHTML=sheets.map(x=>'<div class="note small">'+esc(x.name)+' · '+x.dateRows.length+' dated rows · '+x.people.length+' possible names</div>').join("");
    return;
   }
   selectedFile=file;
-  feedback.classList.add("success");feedback.textContent="Detected "+sheets.length+" dated worksheet(s). Select the correct worksheet and doctor below.";
+  feedback.classList.add("success");feedback.textContent=selectedPerson?"Matched the profile name. Verify the worksheet and doctor below.":"Detected "+sheets.length+" dated worksheet(s). Choose the correct staff member before importing.";
   buildSelectedRotaPreviewFor(selectedSheet.name,selectedPerson);
  }catch(e){
   feedback.classList.remove("success");feedback.classList.add("error");feedback.textContent=e.message||"Unable to read this rota file.";
