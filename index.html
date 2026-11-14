@@ -12,7 +12,7 @@
 </style>
 </head>
 <body>
-<div id="auth" class="auth-wrap"><div class="auth-card"><div class="brand">shift<span>mate</span></div><h1 id="authTitle">Your rota, organised.</h1><p class="muted" id="authSub">Sign in to manage your rotations and shifts.</p><div class="auth-tabs"><button id="tabLogin" class="active" onclick="setAuthMode('login')">Sign in</button><button id="tabSignup" onclick="setAuthMode('signup')">Create account</button></div><div id="nameField" class="field hidden"><label>Full name</label><input id="authName" autocomplete="name" placeholder="Your full name"></div><div class="field"><label>Email address</label><input id="authEmail" type="email" autocomplete="email" placeholder="you@example.com"></div><div class="field"><label>Password</label><input id="authPassword" type="password" autocomplete="current-password" placeholder="At least 8 characters"></div><div id="authMessage" class="notice hidden"></div><button class="btn" style="width:100%;margin-top:8px" id="authSubmit" onclick="submitAuth()">Sign in</button><p class="small muted" style="margin-top:18px">Your rota information is private to your account.</p></div></div>
+<div id="auth" class="auth-wrap"><div class="auth-card"><div class="brand">shift<span>mate</span></div><h1 id="authTitle">Your rota, organised.</h1><p class="muted" id="authSub">Sign in to manage your rotations and shifts.</p><div class="auth-tabs"><button id="tabLogin" class="active" onclick="setAuthMode('login')">Sign in</button><button id="tabSignup" onclick="setAuthMode('signup')">Create account</button></div><div id="nameField" class="field hidden"><label>Full name</label><input id="authName" autocomplete="name" placeholder="Your full name"></div><div class="field"><label>Email address</label><input id="authEmail" type="email" autocomplete="email" placeholder="you@example.com"></div><div class="field" id="passwordField"><label>Password</label><input id="authPassword" type="password" autocomplete="current-password" placeholder="At least 8 characters"></div><div class="field hidden" id="confirmPasswordField"><label>Confirm new password</label><input id="authPasswordConfirm" type="password" autocomplete="new-password" placeholder="Enter your new password again"></div><div id="authMessage" class="notice hidden"></div><button class="btn" style="width:100%;margin-top:8px" id="authSubmit" onclick="submitAuth()">Sign in</button><div id="forgotWrap" class="small" style="text-align:center;margin-top:14px"><button type="button" class="btn ghost" onclick="setAuthMode('forgot')">Forgot password?</button></div><p class="small muted" style="margin-top:18px">Your rota information is private to your account.</p></div></div>
 <div id="app" class="app hidden"><aside class="sidebar"><div class="brand">shift<span>mate</span></div><div class="nav-label">Workspace</div><button class="nav-btn active" data-page="home" onclick="navigate('home')"><span class="nav-icon">⌂</span><span class="nav-text">Overview</span></button><button class="nav-btn" data-page="rota" onclick="navigate('rota')"><span class="nav-icon">▦</span><span class="nav-text">My rota</span></button><button class="nav-btn" data-page="rotations" onclick="navigate('rotations')"><span class="nav-icon">◫</span><span class="nav-text">Rotations</span></button><div class="nav-label">Account</div><button class="nav-btn" data-page="profile" onclick="navigate('profile')"><span class="nav-icon">◎</span><span class="nav-text">Profile</span></button><div class="sidebar-bottom"><button class="nav-btn" onclick="signOut()"><span class="nav-icon">↪</span><span class="nav-text">Sign out</span></button></div></aside><main class="main"><header class="topbar"><div><div class="small muted" id="eyebrow">YOUR WORKSPACE</div><h1 id="pageTitle">Overview</h1></div><div class="user-pill" id="userPill"></div></header><div id="content"></div></main><nav class="mobile-menu"><button onclick="navigate('home')"><span>⌂</span>Home</button><button onclick="navigate('rota')"><span>▦</span>Rota</button><button onclick="navigate('rotations')"><span>◫</span>Rotations</button><button onclick="navigate('profile')"><span>◎</span>Profile</button><button onclick="signOut()"><span>↪</span>Exit</button></nav></div><div id="modalRoot"></div>
 <script>
 const SUPABASE_URL="https://ouohoxmyeqrczwbgncig.supabase.co";
@@ -21,8 +21,56 @@ const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
 let user=null,profile=null,rotations=[],shifts=[],page="home",authMode="login",monthCursor=new Date(),selectedFile=null,previewShifts=[];
 const $=id=>document.getElementById(id), esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 function msg(id,text,error=false){const el=$(id);el.textContent=text;el.classList.remove("hidden","error","success");el.classList.add(error?"error":"success")}
-function setAuthMode(mode){authMode=mode;$("tabLogin").classList.toggle("active",mode==="login");$("tabSignup").classList.toggle("active",mode==="signup");$("nameField").classList.toggle("hidden",mode!=="signup");$("authTitle").textContent=mode==="signup"?"Create your ShiftMate account":"Your rota, organised.";$("authSub").textContent=mode==="signup"?"Start with a personal rota that stays yours.":"Sign in to manage your rotations and shifts.";$("authSubmit").textContent=mode==="signup"?"Create account":"Sign in";$("authMessage").classList.add("hidden")}
-async function submitAuth(){const email=$("authEmail").value.trim(),password=$("authPassword").value; if(!email||!password)return msg("authMessage","Enter your email and password.",true);$("authSubmit").disabled=true;try{let r;if(authMode==="signup"){const full_name=$("authName").value.trim();if(!full_name)throw Error("Enter your full name.");r=await sb.auth.signUp({email,password,options:{data:{full_name},emailRedirectTo:"https://shiftmate-preview.onrender.com/"} });if(r.error)throw r.error;if(!r.data.session){msg("authMessage","Account created. Check your email to verify your address, then sign in.");return}}else{r=await sb.auth.signInWithPassword({email,password});if(r.error)throw r.error}await boot()}catch(e){msg("authMessage",e.message||"Unable to authenticate.",true)}finally{$("authSubmit").disabled=false}}
+function setAuthMode(mode){
+ authMode=mode;
+ const reset=mode==="reset",forgot=mode==="forgot",signup=mode==="signup";
+ $("tabLogin").classList.toggle("active",mode==="login");$("tabSignup").classList.toggle("active",signup);
+ $("tabLogin").classList.toggle("hidden",reset||forgot);$("tabSignup").classList.toggle("hidden",reset||forgot);
+ $("nameField").classList.toggle("hidden",!signup);
+ $("passwordField").classList.toggle("hidden",forgot);
+ $("confirmPasswordField").classList.toggle("hidden",!reset);
+ $("forgotWrap").classList.toggle("hidden",signup||forgot||reset);
+ $("authTitle").textContent=signup?"Create your ShiftMate account":forgot?"Reset your password":reset?"Choose a new password":"Your rota, organised.";
+ $("authSub").textContent=signup?"Start with a personal rota that stays yours.":forgot?"We'll email you a secure password-reset link.":reset?"Choose a new password for your ShiftMate account.":"Sign in to manage your rotations and shifts.";
+ $("authSubmit").textContent=signup?"Create account":forgot?"Send reset link":reset?"Save new password":"Sign in";
+ $("authMessage").classList.add("hidden");
+}
+async function submitAuth(){
+ const email=$("authEmail").value.trim(),password=$("authPassword").value;
+ if(!email)return msg("authMessage","Enter your email address.",true);
+ $("authSubmit").disabled=true;
+ try{
+  let r;
+  if(authMode==="forgot"){
+   r=await sb.auth.resetPasswordForEmail(email,{redirectTo:"https://shiftmate-preview.onrender.com/"});
+   if(r.error)throw r.error;
+   msg("authMessage","If an account exists for this address, a password-reset email has been sent. Check your inbox and spam folder.");
+   return;
+  }
+  if(authMode==="reset"){
+   const confirm=$("authPasswordConfirm").value;
+   if(!password||password.length<8)throw Error("Your new password must be at least 8 characters.");
+   if(password!==confirm)throw Error("The passwords do not match.");
+   r=await sb.auth.updateUser({password});
+   if(r.error)throw r.error;
+   $("authPassword").value="";$("authPasswordConfirm").value="";
+   setAuthMode("login");msg("authMessage","Your password has been updated. You can now sign in.");
+   return;
+  }
+  if(!password)return msg("authMessage","Enter your password.",true);
+  if(authMode==="signup"){
+   const full_name=$("authName").value.trim();if(!full_name)throw Error("Enter your full name.");
+   r=await sb.auth.signUp({email,password,options:{data:{full_name},emailRedirectTo:"https://shiftmate-preview.onrender.com/"}});
+   if(r.error)throw r.error;
+   if(!r.data.session){msg("authMessage","Account created. Check your email to verify your address, then sign in.");return}
+  }else{
+   r=await sb.auth.signInWithPassword({email,password});
+   if(r.error)throw r.error;
+  }
+  await boot();
+ }catch(e){msg("authMessage",e.message||"Unable to complete the request.",true)}
+ finally{$("authSubmit").disabled=false}
+}
 async function signOut(){await sb.auth.signOut();user=null;$("app").classList.add("hidden");$("auth").classList.remove("hidden")}
 async function boot(){const {data:{user:u}}=await sb.auth.getUser();if(!u)return;user=u;$("auth").classList.add("hidden");$("app").classList.remove("hidden");$("userPill").textContent=u.email;await loadData();navigate(rotations.length?"home":"rotations")}
 async function loadData(){const [p,r,s]=await Promise.all([sb.from("profiles").select("*").eq("id",user.id).maybeSingle(),sb.from("rotations").select("*").eq("user_id",user.id).eq("archived",false).order("start_date",{ascending:false}),sb.from("shifts").select("*").eq("user_id",user.id).eq("archived",false).order("shift_date")]);if(p.error)throw p.error;if(r.error)throw r.error;if(s.error)throw s.error;profile=p.data;rotations=r.data||[];shifts=s.data||[];if(!profile){const x=await sb.from("profiles").insert({id:user.id,email:user.email,full_name:user.user_metadata?.full_name||"",rota_matching_name:user.user_metadata?.full_name||""});if(x.error)throw x.error;const q=await sb.from("profiles").select("*").eq("id",user.id).single();profile=q.data}}
@@ -55,6 +103,7 @@ async function loadNotes(id){const q=await sb.from("shift_notes").select("*").eq
 async function addNote(id){const body=$("newNote").value.trim();if(!body)return;const q=await sb.from("shift_notes").insert({user_id:user.id,shift_id:id,body});if(q.error)return alert(q.error.message);$("newNote").value="";await loadNotes(id)}
 async function editNote(noteId,shiftId){const q=await sb.from("shift_notes").select("body").eq("id",noteId).single();if(q.error)return alert(q.error.message);const body=prompt("Edit note",q.data.body);if(body===null)return;if(!body.trim())return alert("A note cannot be empty.");const u=await sb.from("shift_notes").update({body:body.trim(),updated_at:new Date().toISOString()}).eq("id",noteId).eq("user_id",user.id);if(u.error)return alert(u.error.message);await loadNotes(shiftId)}
 async function deleteNote(noteId,shiftId){if(!confirm("Delete this note?"))return;const q=await sb.from("shift_notes").delete().eq("id",noteId).eq("user_id",user.id);if(q.error)return alert(q.error.message);await loadNotes(shiftId)}
-sb.auth.onAuthStateChange((event,session)=>{if(event==="SIGNED_IN"&&session?.user)boot().catch(e=>alert(e.message))});
+sb.auth.onAuthStateChange((event,session)=>{if(event==="PASSWORD_RECOVERY"){setAuthMode("reset");$("auth").classList.remove("hidden");$("app").classList.add("hidden")}else if(event==="SIGNED_IN"&&session?.user)boot().catch(e=>alert(e.message))});
+if(new URLSearchParams(location.hash.slice(1)).get("type")==="recovery"){setAuthMode("reset")}
 (async()=>{const {data:{session}}=await sb.auth.getSession();if(session)boot().catch(e=>alert(e.message))})();
 </script></body></html>
