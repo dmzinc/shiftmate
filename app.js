@@ -100,10 +100,17 @@ function validRotaDate(value){
  const parsed=new Date(date+"T12:00:00Z");
  return !isNaN(parsed)&&parsed.toISOString().slice(0,10)===date?date:"";
 }
-function rotaPersonMatch(raw,selected){
- const p=normalName(raw),t=normalName(selected);
- if(!p||!t)return false;
- return p===t||p.startsWith(t+" ")||t.startsWith(p+" ")||p.includes(t);
+function rotaNameScore(sheetName,profileName){
+ const sheetTokens=normalName(sheetName).split(" ").filter(Boolean);
+ const profileTokens=normalName(profileName).split(" ").filter(Boolean);
+ if(!sheetTokens.length||!profileTokens.length)return 0;
+ // Treat the profile name as the identifying core: every profile token
+ // must appear in the sheet name, while additional middle names are allowed.
+ if(!profileTokens.every(token=>sheetTokens.includes(token)))return 0;
+ return sheetTokens.length===profileTokens.length?100:90;
+}
+function rotaPersonMatch(sheetName,profileName){
+ return rotaNameScore(sheetName,profileName)>0;
 }
 function inspectRotaWorkbook(wb){
  const sheets=[];
@@ -235,12 +242,14 @@ async function readRotaFile(rotationId,file){
   if(!sheets.length)throw Error("No worksheets with dated rows were detected. Please check that the workbook contains real Excel dates.");
   const target=normalName(profile.rota_matching_name||profile.full_name||"");
   rotaImportState={sheets,file,rotationId};
-  let selectedSheet=null,selectedPerson=null,bestScore=0;
+  let selectedSheet=null,selectedPerson=null,bestScore=0,bestMatches=[];
   for(const sh of sheets)for(const [person] of sh.people){
-   const p=normalName(person);
-   const score=p===target?100:(target&&(p.includes(target)||target.includes(p))?75:0);
-   if(score>bestScore){bestScore=score;selectedSheet=sh;selectedPerson=person}
+   const score=rotaNameScore(person,target);
+   if(score>bestScore){bestScore=score;bestMatches=[{sheet:sh,person}]}
+   else if(score&&score===bestScore)bestMatches.push({sheet:sh,person});
   }
+  // Only preselect a name when the best match is unambiguous.
+  if(bestMatches.length===1){selectedSheet=bestMatches[0].sheet;selectedPerson=bestMatches[0].person}
   if(!selectedSheet)selectedSheet=sheets.find(x=>x.people.length)||sheets[0];
   if(!selectedPerson)selectedPerson="";
   if(!selectedPerson){
