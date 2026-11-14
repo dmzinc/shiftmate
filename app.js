@@ -1,0 +1,266 @@
+
+const SUPABASE_URL="https://ouohoxmyeqrczwbgncig.supabase.co";
+const SUPABASE_KEY="sb_publishable_QVW-P5U2d0EN7R16jFAysQ_1RpWHMMh";
+const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+let user=null,profile=null,rotations=[],shifts=[],page="home",authMode="login",monthCursor=new Date(),selectedFile=null,previewShifts=[];
+const $=id=>document.getElementById(id), esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+function msg(id,text,error=false){const el=$(id);el.textContent=text;el.classList.remove("hidden","error","success");el.classList.add(error?"error":"success")}
+function setAuthMode(mode){
+ authMode=mode;
+ const reset=mode==="reset",forgot=mode==="forgot",signup=mode==="signup";
+ $("tabLogin").classList.toggle("active",mode==="login");$("tabSignup").classList.toggle("active",signup);
+ $("tabLogin").classList.toggle("hidden",reset||forgot);$("tabSignup").classList.toggle("hidden",reset||forgot);
+ $("nameField").classList.toggle("hidden",!signup);
+ $("passwordField").classList.toggle("hidden",forgot);
+ $("confirmPasswordField").classList.toggle("hidden",!reset);
+ $("forgotWrap").classList.toggle("hidden",signup||forgot||reset);
+ $("authTitle").textContent=signup?"Create your ShiftMate account":forgot?"Reset your password":reset?"Choose a new password":"Your rota, organised.";
+ $("authSub").textContent=signup?"Start with a personal rota that stays yours.":forgot?"We'll email you a secure password-reset link.":reset?"Choose a new password for your ShiftMate account.":"Sign in to manage your rotations and shifts.";
+ $("authSubmit").textContent=signup?"Create account":forgot?"Send reset link":reset?"Save new password":"Sign in";
+ $("authMessage").classList.add("hidden");
+}
+async function submitAuth(){
+ const email=$("authEmail").value.trim(),password=$("authPassword").value;
+ if(!email)return msg("authMessage","Enter your email address.",true);
+ $("authSubmit").disabled=true;
+ try{
+  let r;
+  if(authMode==="forgot"){
+   r=await sb.auth.resetPasswordForEmail(email,{redirectTo:"https://shiftmate-preview.onrender.com/"});
+   if(r.error)throw r.error;
+   msg("authMessage","If an account exists for this address, a password-reset email has been sent. Check your inbox and spam folder.");
+   return;
+  }
+  if(authMode==="reset"){
+   const confirm=$("authPasswordConfirm").value;
+   if(!password||password.length<8)throw Error("Your new password must be at least 8 characters.");
+   if(password!==confirm)throw Error("The passwords do not match.");
+   r=await sb.auth.updateUser({password});
+   if(r.error)throw r.error;
+   $("authPassword").value="";$("authPasswordConfirm").value="";
+   setAuthMode("login");msg("authMessage","Your password has been updated. You can now sign in.");
+   return;
+  }
+  if(!password)return msg("authMessage","Enter your password.",true);
+  if(authMode==="signup"){
+   const full_name=$("authName").value.trim();if(!full_name)throw Error("Enter your full name.");
+   r=await sb.auth.signUp({email,password,options:{data:{full_name},emailRedirectTo:"https://shiftmate-preview.onrender.com/"}});
+   if(r.error)throw r.error;
+   if(!r.data.session){msg("authMessage","Account created. Check your email to verify your address, then sign in.");return}
+  }else{
+   r=await sb.auth.signInWithPassword({email,password});
+   if(r.error)throw r.error;
+  }
+  await boot();
+ }catch(e){msg("authMessage",e.message||"Unable to complete the request.",true)}
+ finally{$("authSubmit").disabled=false}
+}
+async function signOut(){await sb.auth.signOut();user=null;$("app").classList.add("hidden");$("auth").classList.remove("hidden")}
+async function boot(){const {data:{user:u}}=await sb.auth.getUser();if(!u)return;user=u;$("auth").classList.add("hidden");$("app").classList.remove("hidden");$("userPill").textContent=u.email;await loadData();navigate(rotations.length?"home":"rotations")}
+async function loadData(){const [p,r,s]=await Promise.all([sb.from("profiles").select("*").eq("id",user.id).maybeSingle(),sb.from("rotations").select("*").eq("user_id",user.id).eq("archived",false).order("start_date",{ascending:false}),sb.from("shifts").select("*").eq("user_id",user.id).eq("archived",false).order("shift_date")]);if(p.error)throw p.error;if(r.error)throw r.error;if(s.error)throw s.error;profile=p.data;rotations=r.data||[];shifts=s.data||[];if(!profile){const x=await sb.from("profiles").insert({id:user.id,email:user.email,full_name:user.user_metadata?.full_name||"",rota_matching_name:user.user_metadata?.full_name||""});if(x.error)throw x.error;const q=await sb.from("profiles").select("*").eq("id",user.id).single();profile=q.data}}
+function navigate(p){page=p;document.querySelectorAll(".nav-btn[data-page]").forEach(b=>b.classList.toggle("active",b.dataset.page===p));$("pageTitle").textContent=({home:"Overview",rota:"My rota",rotations:"Rotations",profile:"Profile"})[p];$("eyebrow").textContent=p==="profile"?"YOUR ACCOUNT":"YOUR WORKSPACE";render()}
+function render(){if(page==="home")renderHome();if(page==="rotations")renderRotations();if(page==="rota")renderRota();if(page==="profile")renderProfile()}
+function fmtDate(d,opts={day:"numeric",month:"short",year:"numeric"}){return new Date(d+"T12:00:00").toLocaleDateString("en-GB",opts)}
+function futureShifts(){const today=new Date().toISOString().slice(0,10);return shifts.filter(s=>s.shift_date>=today).sort((a,b)=>a.shift_date.localeCompare(b.shift_date)||(a.start_time||"").localeCompare(b.start_time||""))}
+function renderHome(){if(!rotations.length){$("content").innerHTML='<div class="empty"><div class="emoji">🗓️</div><h2>Start with your first rotation</h2><p class="muted">Create a rotation before importing your team rota. Your workspace will start empty.</p><button class="btn" onclick="openRotation()">Create your first rotation</button></div>';return}const next=futureShifts()[0];$("content").innerHTML='<div class="grid"><div class="card"><div class="stat-label">Active rotations</div><div class="stat-num">'+rotations.length+'</div></div><div class="card"><div class="stat-label">Upcoming shifts</div><div class="stat-num">'+futureShifts().length+'</div></div><div class="card"><div class="stat-label">Total shifts</div><div class="stat-num">'+shifts.length+'</div></div></div><div class="section-head"><h2>Next assignment</h2><button class="btn secondary" onclick="navigate(\'rota\')">View rota</button></div>'+(next?shiftCard(next):'<div class="card muted">No upcoming shifts. Import a rota to get started.</div>')+'<div class="section-head"><h2>Upcoming shifts</h2><span class="small muted">Next 5 assignments</span></div><div class="shift-list">'+(futureShifts().slice(0,5).map(shiftCard).join("")||'<div class="card muted">Nothing scheduled yet.</div>')+'</div><div class="section-head"><h2>Your rotations</h2><button class="btn secondary" onclick="navigate(\'rotations\')">Manage rotations</button></div><div class="rotation-list">'+rotations.slice(0,4).map(rotationCard).join("")+'</div>'}
+function shiftCard(s){const date=new Date(s.shift_date+"T12:00:00");const time=(s.start_time?esc(s.start_time.slice(0,5)):"Time not set")+"–"+(s.end_time?esc(s.end_time.slice(0,5)):"Time not set");const specialty=rotations.find(r=>r.id===s.rotation_id)?.specialty||"Shift";return `<div class="shift-row" onclick="openShift('${s.id}')"><div class="datebox"><b>${date.getDate()}</b><span>${date.toLocaleDateString("en-GB",{month:"short"})}</span></div><div class="shift-info"><b>${esc(s.shift_type)}</b><span>${esc(s.ward||"Not specified")} · ${time}</span></div><span class="tag">${esc(specialty)}</span></div>`}
+function rotationCard(r){return '<div class="rotation"><h3>'+esc(r.specialty)+'</h3><div class="small muted">'+esc(r.grade||"")+' · '+fmtDate(r.start_date,{month:"short",year:"numeric"})+' – '+fmtDate(r.end_date,{month:"short",year:"numeric"})+'</div><div class="small muted" style="margin-top:8px">'+shifts.filter(s=>s.rotation_id===r.id).length+' shifts</div><div class="rotation-actions"><button class="btn secondary" onclick="openImport(\''+r.id+'\')">Upload rota</button><button class="btn ghost" onclick="editRotation(\''+r.id+'\')">Edit</button><button class="btn ghost" onclick="deleteRotation(\''+r.id+'\')">Delete</button></div></div>'}
+function renderRotations(){$("content").innerHTML='<div class="section-head" style="margin-top:0"><div><h2>Manage your rotations</h2><div class="small muted">Each rota import belongs to one rotation.</div></div><button class="btn" onclick="openRotation()">+ New rotation</button></div>'+(rotations.length?'<div class="rotation-list">'+rotations.map(rotationCard).join("")+'</div>':'<div class="empty"><div class="emoji">◫</div><h2>No rotations yet</h2><p class="muted">Create a rotation to begin. You can add your rota afterwards.</p><button class="btn" onclick="openRotation()">Create rotation</button></div>')}
+function renderRota(){if(!rotations.length){$("content").innerHTML='<div class="empty"><h2>Create a rotation first</h2><p class="muted">Your shifts will appear here after you create a rotation and import a rota.</p><button class="btn" onclick="navigate(\'rotations\')">Create rotation</button></div>';return}const y=monthCursor.getFullYear(),m=monthCursor.getMonth(),first=new Date(y,m,1),days=new Date(y,m+1,0).getDate(),offset=(first.getDay()+6)%7;let cells="";for(let i=0;i<offset;i++)cells+='<div></div>';for(let d=1;d<=days;d++){const date=y+"-"+String(m+1).padStart(2,"0")+"-"+String(d).padStart(2,"0"),ss=shifts.filter(s=>s.shift_date===date);cells+='<div class="cal-day '+(date===new Date().toISOString().slice(0,10)?"today":"")+'"><b>'+d+'</b>'+ss.map(s=>'<span class="cal-shift" title="'+esc(s.shift_type)+'" onclick="openShift(\''+s.id+'\')">'+esc(s.shift_type)+'</span>').join("")+'</div>'}$("content").innerHTML='<div class="toolbar"><button class="btn secondary" onclick="monthMove(-1)">←</button><b>'+monthCursor.toLocaleDateString("en-GB",{month:"long",year:"numeric"})+'</b><button class="btn secondary" onclick="monthMove(1)">→</button><span class="muted small">'+shifts.length+' shifts</span><span style="flex:1"></span><button class="btn secondary" onclick="openShiftForm(\'\')">+ Add shift</button><button class="btn" onclick="openImport(\''+rotations[0].id+'\')">Upload rota</button></div><div class="card" style="margin-top:15px"><div class="calendar">'+["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(d=>'<div class="cal-head">'+d+'</div>').join("")+cells+'</div></div><div class="section-head"><h2>All shifts</h2><span class="small muted">Select a shift to view notes</span></div><div class="shift-list">'+(shifts.map(shiftCard).join("")||'<div class="card muted">No shifts imported yet.</div>')+'</div>'}
+function monthMove(n){monthCursor.setMonth(monthCursor.getMonth()+n);renderRota()}
+function renderProfile(){$("content").innerHTML='<div class="card profile-grid"><h2 style="margin-top:0">Your profile</h2><p class="muted small">Your rota matching name is used to identify your assignments in a team rota. Use the exact name shown on your rota.</p><div class="field"><label>Full name</label><input id="profileName" value="'+esc(profile?.full_name)+'"></div><div class="field"><label>Rota matching name</label><input id="matchingName" value="'+esc(profile?.rota_matching_name)+'"></div><div class="field"><label>Email address</label><input disabled value="'+esc(user.email)+'"></div><div class="field"><label>Time zone</label><select id="timezone"><option value="Europe/London">Europe/London</option><option value="Europe/Malta">Europe/Malta</option><option value="Europe/Dublin">Europe/Dublin</option></select></div><button class="btn" onclick="saveProfile()">Save profile</button><div id="profileMessage" class="notice hidden"></div></div>';$("timezone").value=profile?.timezone||"Europe/London"}
+async function saveProfile(){const x=await sb.from("profiles").update({full_name:$("profileName").value.trim(),rota_matching_name:$("matchingName").value.trim(),timezone:$("timezone").value,updated_at:new Date().toISOString()}).eq("id",user.id);if(x.error)return alert(x.error.message);await loadData();msg("profileMessage","Profile saved.")}
+function modal(title,body,actions){$("modalRoot").innerHTML='<div class="modal-back" onclick="if(event.target===this)closeModal()"><div class="modal"><div class="modal-head"><h2>'+title+'</h2><button class="close" onclick="closeModal()">×</button></div>'+body+'<div class="modal-actions">'+actions+'</div></div></div>'}
+function closeModal(){$("modalRoot").innerHTML=""}
+function openRotation(r){const edit=!!r;modal(edit?"Edit rotation":"Create a rotation",'<div class="field"><label>Specialty / department</label><input id="rotSpecialty" placeholder="e.g. General Surgery" value="'+esc(r?.specialty||"")+'"></div><div class="field"><label>Grade (optional)</label><input id="rotGrade" placeholder="e.g. FY1" value="'+esc(r?.grade||"")+'"></div><div class="field"><label>Start date</label><input id="rotStart" type="date" value="'+(r?.start_date||"")+'"></div><div class="field"><label>End date</label><input id="rotEnd" type="date" value="'+(r?.end_date||"")+'"></div><div class="small muted">You can upload a rota after saving this rotation.</div>','<button class="btn secondary" onclick="closeModal()">Cancel</button><button class="btn" onclick="saveRotation(\''+(r?.id||"")+'\')">Save rotation</button>')}
+function editRotation(id){openRotation(rotations.find(r=>r.id===id))}
+async function saveRotation(id){const specialty=$("rotSpecialty").value.trim(),start_date=$("rotStart").value,end_date=$("rotEnd").value;if(!specialty||!start_date||!end_date)return alert("Complete the specialty and date fields.");if(end_date<start_date)return alert("End date must be after start date.");const payload={specialty,grade:$("rotGrade").value.trim()||null,organisation:"Not specified",start_date,end_date,updated_at:new Date().toISOString()};const q=id?await sb.from("rotations").update(payload).eq("id",id).eq("user_id",user.id):await sb.from("rotations").insert({...payload,user_id:user.id});if(q.error)return alert(q.error.message);closeModal();await loadData();render()}
+async function deleteRotation(id){if(!confirm("Delete this rotation and its shifts and notes? This cannot be undone."))return;const q=await sb.from("rotations").delete().eq("id",id).eq("user_id",user.id);if(q.error)return alert(q.error.message);await loadData();render()}
+function openImport(id){const r=rotations.find(x=>x.id===id);selectedFile=null;previewShifts=[];modal("Upload a team rota",'<p class="muted small">Rotation: <b>'+esc(r.specialty)+'</b>. Select a CSV or Excel file. The file is processed in your browser; only your confirmed shifts are sent to ShiftMate.</p><div class="field"><label>Rota file</label><input id="rotaFile" type="file" accept=".csv,.xlsx,.xls" onchange="readRotaFile(\''+id+'\',this.files[0])"></div><div id="importFeedback" class="notice hidden"></div><div id="previewArea"></div>','<button class="btn secondary" onclick="closeModal()">Cancel</button><button id="confirmImport" class="btn" disabled onclick="confirmImport(\''+id+'\')">Confirm import</button>')}
+function norm(v){return String(v??"").toLowerCase().replace(/\s+/g," ").trim()}
+function cellDate(v){if(v instanceof Date)return v.toISOString().slice(0,10);if(typeof v==="number"){const d=XLSX.SSF.parse_date_code(v);if(d)return d.y+"-"+String(d.m).padStart(2,"0")+"-"+String(d.d).padStart(2,"0")}const s=String(v??"").trim();if(/^\d{4}-\d{2}-\d{2}/.test(s))return s.slice(0,10);const m=s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})$/);if(m){let y=+m[3];if(y<100)y+=2000;return y+"-"+String(+m[2]).padStart(2,"0")+"-"+String(+m[1]).padStart(2,"0")}return ""}
+function timeVal(v){if(typeof v==="number"){const mins=Math.round(v*1440)%1440;return String(Math.floor(mins/60)).padStart(2,"0")+":"+String(mins%60).padStart(2,"0")+":00"}let s=String(v??"").trim();const m=s.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);if(!m)return "";return String(+m[1]).padStart(2,"0")+":"+m[2]+":00"}
+function parseClockRange(value){
+ const text=String(value??"").replace(/\s+/g," ").trim();
+ const m=text.match(/(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*[-–to]+\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)/i);
+ if(!m)return null;
+ const cv=v=>{const z=v.trim().match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i);if(!z)return null;let h=+z[1],mi=+(z[2]||0),ap=(z[3]||"").toLowerCase();if(ap==="pm"&&h<12)h+=12;if(ap==="am"&&h===12)h=0;if(h>23||mi>59)return null;return String(h).padStart(2,"0")+":"+String(mi).padStart(2,"0")+":00"};
+ const a=cv(m[1]),b=cv(m[2]);return a&&b?{start:a,end:b}:null;
+}
+function dateFromCell(v){
+ if(v instanceof Date&&!isNaN(v))return v.getFullYear()+"-"+String(v.getMonth()+1).padStart(2,"0")+"-"+String(v.getDate()).padStart(2,"0");
+ return cellDate(v);
+}
+function normalName(v){return norm(v).replace(/[^a-z0-9]+/g," ").trim()}
+async function readRotaFile(rotationId,file){
+ if(!file)return;
+ const feedback=$("importFeedback");feedback.classList.remove("hidden","error","success");feedback.textContent="Inspecting worksheets and rota layout…";
+ $("confirmImport").disabled=true;previewShifts=[];
+ try{
+  const buf=await file.arrayBuffer();
+  const wb=file.name.toLowerCase().endsWith(".csv")?XLSX.read(new TextDecoder().decode(buf),{type:"string",cellDates:true}):XLSX.read(buf,{type:"array",cellDates:true});
+  const target=normalName(profile.rota_matching_name||profile.full_name);
+  if(!target)throw Error("Set your rota matching name in Profile before importing.");
+  const candidates=[];
+  const codeTimes={};
+  // Read code legends from any worksheet: code | description | time range.
+  for(const sn of wb.SheetNames){
+   const grid=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,defval:"",raw:true});
+   for(const row of grid){
+    for(let c=0;c<Math.min(row.length,4);c++){
+     const code=String(row[c]??"").trim();
+     if(!code||code.length>12)continue;
+     for(let j=c+1;j<Math.min(row.length,c+5);j++){
+      const range=parseClockRange(row[j]);
+      if(range)codeTimes[norm(code)]=range;
+     }
+    }
+   }
+  }
+  for(const sn of wb.SheetNames){
+   const grid=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,defval:"",raw:true});
+   if(!grid.length)continue;
+   const width=Math.max(...grid.map(r=>r.length));
+   // Identify likely date column from actual date density.
+   let dateCol=-1,bestDateCount=0;
+   for(let c=0;c<Math.min(width,8);c++){
+    const count=grid.slice(0,Math.min(grid.length,250)).filter(r=>dateFromCell(r[c])).length;
+    if(count>bestDateCount){bestDateCount=count;dateCol=c}
+   }
+   if(dateCol<0||bestDateCount<2)continue;
+   // Search the first 12 rows for the user's name in a column heading,
+   // including multi-row headers where a name is on a lower header line.
+   let staffCol=-1,staffRow=-1,bestNameScore=0;
+   for(let r=0;r<Math.min(12,grid.length);r++){
+    for(let c=0;c<width;c++){
+     const v=normalName(grid[r][c]);if(!v)continue;
+     const score=v===target?100:(v.includes(target)||target.includes(v)&&v.length>5?75:0);
+     if(score>bestNameScore){bestNameScore=score;staffCol=c;staffRow=r}
+    }
+   }
+   const rows=[];
+   // Layout A: dates down rows, staff member in a column header.
+   if(staffCol>=0&&staffCol!==dateCol&&bestNameScore>=75){
+    for(let r=0;r<grid.length;r++){
+     const date=dateFromCell(grid[r][dateCol]);if(!date)continue;
+     const raw=String(grid[r][staffCol]??"").trim();if(!raw)continue;
+     const code=raw.replace(/\s+/g," ");
+     if(/^(off|annual leave|a\/l|s\/l|study leave|rest|blank|-)$/i.test(code))continue;
+     let range=codeTimes[norm(code)];
+     // Prefer explicit shift times found elsewhere in the same row.
+     for(const cell of grid[r]){const candidate=parseClockRange(cell);if(candidate){range=candidate;break}}
+     rows.push({date,code,range,ward:sn});
+    }
+   }else{
+    // Layout B: names appear in assignment cells; each assignment column
+    // represents a duty/role, and date rows identify the day.
+    for(let r=0;r<grid.length;r++){
+     const date=dateFromCell(grid[r][dateCol]);if(!date)continue;
+     for(let c=0;c<width;c++){
+      if(c===dateCol)continue;
+      const raw=String(grid[r][c]??"").trim();if(!raw)continue;
+      const person=normalName(raw);
+      if(!(person===target||(person.length>8&&target.includes(person))||(target.length>8&&person.includes(target))))continue;
+      const header=String(grid[0]?.[c]??"").trim()||String(grid[Math.max(0,r-1)]?.[c]??"").trim()||"Assigned duty";
+      let range=null;
+      for(let hr=Math.max(0,r-4);hr<r;hr++){range=parseClockRange(grid[hr]?.[c]);if(range)break}
+      rows.push({date,code:header,range,ward:sn});
+     }
+    }
+   }
+   if(rows.length)candidates.push({sheet:sn,rows,matched:bestNameScore>=75});
+  }
+  if(!candidates.length)throw Error("No matching shifts could be identified. We inspected "+wb.SheetNames.length+" worksheets. Try setting your rota matching name exactly as it appears in the workbook, or choose a worksheet containing dated assignments.");
+  // Use the best-matching sheet, never silently combine unrelated worksheets.
+  candidates.sort((a,b)=>(b.matched?1:0)-(a.matched?1:0)||b.rows.length-a.rows.length);
+  const chosen=candidates[0];
+  const unique=[...new Map(chosen.rows.map(x=>[x.date+"|"+x.code+"|"+(x.range?.start||"")+"|"+(x.range?.end||""),x])).values()];
+  previewShifts=unique.map(x=>({shift_date:x.date,shift_type:x.code,start_time:x.range?.start||"",end_time:x.range?.end||"",ward:x.ward}));
+  if(!previewShifts.length)throw Error("The matching worksheet did not contain any working shifts for "+(profile.rota_matching_name||profile.full_name)+".");
+  selectedFile=file;
+  const unresolved=[...new Set(previewShifts.filter(x=>!x.start_time||!x.end_time).map(x=>x.shift_type))];
+  feedback.classList.add("success");
+  feedback.textContent="Found "+previewShifts.length+" possible shift(s) in '"+chosen.sheet+"'. "+(unresolved.length?"Please assign times to the shift codes below before importing.":"Review the preview before importing.");
+  const codeFields=unresolved.map((code,i)=>'<div class="card" style="padding:12px;margin:8px 0"><b>'+esc(code)+'</b><div class="grid" style="grid-template-columns:1fr 1fr;gap:8px"><div class="field"><label>Start time</label><input type="time" id="codeStart'+i+'"></div><div class="field"><label>End time</label><input type="time" id="codeEnd'+i+'"></div></div><input type="hidden" id="codeValue'+i+'" value="'+esc(code)+'"></div>').join("");
+  $("previewArea").innerHTML=(unresolved.length?'<div class="small muted" style="margin:12px 0">Set the times for each shift code. These times will be applied to all matching shifts in this import.</div>'+codeFields:'')+'<div class="small muted" style="margin:10px 0">Preview · '+esc(chosen.sheet)+'</div>'+previewShifts.slice(0,12).map(x=>'<div class="note small"><b>'+fmtDate(x.shift_date)+'</b> · '+esc(x.shift_type)+' · '+(x.start_time?esc(x.start_time.slice(0,5))+'–'+esc(x.end_time.slice(0,5)):'<i>Times to be assigned</i>')+'</div>').join("")+(previewShifts.length>12?'<div class="small muted">and '+(previewShifts.length-12)+' more…</div>':"");
+  $("confirmImport").disabled=false;
+ }catch(e){
+  feedback.classList.remove("success");feedback.classList.add("error");feedback.textContent=e.message||"Unable to read this rota file.";
+  previewShifts=[];$("confirmImport").disabled=true;
+ }
+}
+async function confirmImport(id){
+ if(!previewShifts.length)return;
+ const btn=$("confirmImport");btn.disabled=true;btn.textContent="Importing…";
+ try{
+  const unresolved=[...new Set(previewShifts.filter(x=>!x.start_time||!x.end_time).map(x=>x.shift_type))];
+  const mappings={};
+  unresolved.forEach((code,i)=>{const start=$("codeStart"+i)?.value||"",end=$("codeEnd"+i)?.value||"";if(!start||!end)throw Error("Enter both start and end times for shift code "+code+".");mappings[code]={start_time:start+":00",end_time:end+":00"}});
+  const payload=previewShifts.map(x=>({...x,...(mappings[x.shift_type]||{})}));
+  const {data,error}=await sb.rpc("confirm_rota_import",{p_rotation_id:id,p_filename:selectedFile.name,p_shifts:payload});
+  if(error)throw error;
+  closeModal();await loadData();navigate("rota");alert("Import complete: "+(data.imported_count||0)+" added/updated, "+(data.duplicate_count||0)+" duplicates skipped.");
+ }catch(e){alert("Import failed: "+e.message);btn.disabled=false;btn.textContent="Confirm import"}
+}
+async function openShift(id){const s=shifts.find(x=>x.id===id);if(!s)return;const rot=rotations.find(r=>r.id===s.rotation_id);modal("Shift details",'<div class="notice">'+esc(rot?.specialty||"Rotation")+'</div><h3 style="margin:12px 0 4px">'+esc(s.shift_type)+'</h3><div class="muted">'+fmtDate(s.shift_date)+' · '+(s.start_time?esc(s.start_time.slice(0,5)):"Time not set")+'–'+(s.end_time?esc(s.end_time.slice(0,5)):"Time not set")+'</div><p>'+esc(s.ward||"")+'</p><div class="section-head"><h2>Private notes</h2><span class="small muted">Only you can see these</span></div><div id="notesList">Loading notes…</div><div class="field"><label>Add a note</label><input id="newNote" placeholder="Write a reminder or handover note…"></div><button class="btn" onclick="addNote(\''+id+'\')">Add note</button>','<button class="btn secondary" onclick="closeModal()">Close</button><button class="btn secondary" onclick="openShiftForm(\''+id+'\')">Edit shift</button><button class="btn danger" onclick="deleteShift(\''+id+'\')">Delete shift</button>');await loadNotes(id)}
+function openShiftForm(id){
+ const x=shifts.find(s=>s.id===id),rotationId=x?.rotation_id||rotations[0]?.id;
+ if(!rotationId)return alert("Create a rotation first.");
+ modal(x?"Edit shift":"Add a shift",'<div class="field"><label>Rotation</label><select id="shiftRotation">'+rotations.map(r=>'<option value="'+r.id+'" '+(r.id===rotationId?'selected':'')+'>'+esc(r.specialty)+'</option>').join("")+'</select></div><div class="field"><label>Date</label><input id="shiftDate" type="date" value="'+(x?.shift_date||"")+'"></div><div class="field"><label>Shift / duty</label><input id="shiftType" placeholder="e.g. Long Day, Night, SDT" value="'+esc(x?.shift_type||"")+'"></div><div class="grid" style="grid-template-columns:1fr 1fr;gap:10px"><div class="field"><label>Start time</label><input id="shiftStart" type="time" value="'+(x?.start_time?.slice(0,5)||"")+'"></div><div class="field"><label>End time</label><input id="shiftEnd" type="time" value="'+(x?.end_time?.slice(0,5)||"")+'"></div></div><div class="field"><label>Ward / location (optional)</label><input id="shiftWard" value="'+esc(x?.ward||"")+'" placeholder="Ward or location"></div><div class="small muted">You can leave times blank while recording a shift code, then edit them later.</div>','<button class="btn secondary" onclick="closeModal()">Cancel</button><button class="btn" onclick="saveShift(\''+(id||"")+'\')">Save shift</button>');
+}
+async function saveShift(id){
+ const date=$("shiftDate").value,type=$("shiftType").value.trim(),start=$("shiftStart").value,end=$("shiftEnd").value,rotation_id=$("shiftRotation").value;
+ if(!date||!type)return alert("Enter a date and shift/duty name.");
+ if((start&&!end)||(!start&&end))return alert("Enter both times, or leave both blank.");
+ const payload={user_id:user.id,rotation_id,shift_date:date,shift_type:type,start_time:start?start+":00":null,end_time:end?end+":00":null,ward:$("shiftWard").value.trim()||"Not specified"};
+ let q=id?await sb.from("shifts").update(payload).eq("id",id).eq("user_id",user.id):await sb.from("shifts").insert(payload);
+ if(q.error)return alert("Could not save shift: "+q.error.message);
+ closeModal();await loadData();navigate("rota");
+}
+async function deleteShift(id){
+ if(!confirm("Delete this shift? Its private notes may also be affected."))return;
+ const q=await sb.from("shifts").delete().eq("id",id).eq("user_id",user.id);
+ if(q.error)return alert("Could not delete shift: "+q.error.message);
+ closeModal();await loadData();render();
+}
+async function loadNotes(id){const q=await sb.from("shift_notes").select("*").eq("shift_id",id).eq("user_id",user.id).order("created_at");if(q.error){$("notesList").textContent=q.error.message;return}$("notesList").innerHTML=q.data.length?q.data.map(n=>'<div class="note"><div id="noteText'+n.id+'">'+esc(n.body)+'</div><div class="note-actions"><button class="btn ghost small" onclick="editNote(\''+n.id+'\',\''+id+'\')">Edit</button><button class="btn ghost small" onclick="deleteNote(\''+n.id+'\',\''+id+'\')">Delete</button></div></div>').join(""):'<div class="small muted">No notes yet. Add your first note below.</div>'}
+async function addNote(id){const body=$("newNote").value.trim();if(!body)return;const q=await sb.from("shift_notes").insert({user_id:user.id,shift_id:id,body});if(q.error)return alert(q.error.message);$("newNote").value="";await loadNotes(id)}
+async function editNote(noteId,shiftId){const q=await sb.from("shift_notes").select("body").eq("id",noteId).single();if(q.error)return alert(q.error.message);const body=prompt("Edit note",q.data.body);if(body===null)return;if(!body.trim())return alert("A note cannot be empty.");const u=await sb.from("shift_notes").update({body:body.trim(),updated_at:new Date().toISOString()}).eq("id",noteId).eq("user_id",user.id);if(u.error)return alert(u.error.message);await loadNotes(shiftId)}
+async function deleteNote(noteId,shiftId){if(!confirm("Delete this note?"))return;const q=await sb.from("shift_notes").delete().eq("id",noteId).eq("user_id",user.id);if(q.error)return alert(q.error.message);await loadNotes(shiftId)}
+let recoverySessionReady=false;
+function showPasswordReset(){
+ setAuthMode("reset");
+ $("auth").classList.remove("hidden");
+ $("app").classList.add("hidden");
+}
+sb.auth.onAuthStateChange((event,session)=>{
+ if(event==="PASSWORD_RECOVERY"){recoverySessionReady=!!session;showPasswordReset()}
+ else if(event==="SIGNED_IN"&&session?.user&&!recoverySessionReady)boot().catch(e=>alert(e.message));
+});
+(async()=>{
+ try{
+  const params=new URLSearchParams(location.hash.startsWith("#")?location.hash.slice(1):location.hash);
+  const isRecovery=params.get("type")==="recovery";
+  const accessToken=params.get("access_token");
+  const refreshToken=params.get("refresh_token");
+  let session=null;
+  if(isRecovery&&accessToken&&refreshToken){
+   const {data,error}=await sb.auth.setSession({access_token:accessToken,refresh_token:refreshToken});
+   if(error)throw error;
+   session=data.session;
+   recoverySessionReady=!!session;
+   history.replaceState(null,"",location.pathname+location.search);
+  }else{
+   const {data,error}=await sb.auth.getSession();
+   if(error)throw error;
+   session=data.session;
+  }
+  if(isRecovery){
+   if(session){recoverySessionReady=true;showPasswordReset()}
+   else{showPasswordReset();msg("authMessage","This password-reset link is invalid or has expired. Please request a new link.",true)}
+  }else if(session){await boot()}
+ }catch(e){
+  showPasswordReset();
+  msg("authMessage",e.message||"Unable to validate the password-reset link. Please request a new one.",true);
+ }
+})();
