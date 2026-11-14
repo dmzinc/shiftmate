@@ -128,10 +128,26 @@ Return JSON only: {"quote":"...","theme":"one of confidence,resilience,purpose,s
     try { candidate = JSON.parse(payload.choices?.[0]?.message?.content || "{}"); } catch { continue; }
     const quote = String(candidate.quote || "").trim().replace(/^["']|["']$/g, "");
     if (quote.length < 25 || quote.length > 220 || quote.split(/\s+/).length > 22) continue;
-    const duplicate = previous.some(old => normalise(old) === normalise(quote) || similarity(old, quote) >= 0.62);
+    const embeddingResponse = await fetch("https://api.openai.com/v1/embeddings", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${openAiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "text-embedding-3-small", input: quote }),
+    });
+    if (!embeddingResponse.ok) return json({ error: "Similarity service is temporarily unavailable" }, 502);
+    const embeddingPayload = await embeddingResponse.json();
+    const embedding = embeddingPayload.data?.[0]?.embedding;
+    if (!Array.isArray(embedding) || embedding.length !== 1536) continue;
+    const { data: similar, error: similarityError } = await admin.rpc("has_similar_daily_motivation", {
+      p_user_id: user.id,
+      p_quote: quote,
+      p_embedding: `[${embedding.join(",")}]`,
+    });
+    if (similarityError) return json({ error: "Could not validate message originality" }, 500);
+    const duplicate = similar === true || previous.some(old => normalise(old) === normalise(quote) || similarity(old, quote) >= 0.62);
     if (!duplicate) accepted = {
       quote,
       theme: ["confidence", "resilience", "purpose", "self-care", "growth", "encouragement"].includes(candidate.theme) ? candidate.theme : "encouragement",
+      embedding,
     };
     if (accepted) break;
   }
@@ -140,7 +156,7 @@ Return JSON only: {"quote":"...","theme":"one of confidence,resilience,purpose,s
   const quoteHash = await hash(accepted.quote);
   const { data: saved, error: saveError } = await admin.from("daily_motivations").insert({
     user_id: user.id, local_date: date, quote: accepted.quote,
-    theme: accepted.theme, quote_hash: quoteHash, model: "gpt-4o-mini",
+    theme: accepted.theme, quote_hash: quoteHash, model: "gpt-4o-mini", embedding: `[${accepted.embedding.join(",")}]`,
   }).select("id,quote,theme,local_date,created_at").single();
 
   if (saveError) {
