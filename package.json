@@ -5,8 +5,11 @@
   "type": "module",
   "description": "ShiftMate rota management web and Capacitor mobile application",
   "scripts": {
-    "cap:sync": "cap sync",
-    "cap:copy": "cap copy",
+    "build:mobile": "node scripts/build-mobile.mjs",
+    "cap:sync": "npm run build:mobile && cap sync",
+    "cap:copy": "npm run build:mobile && cap copy",
+    "cap:add:android": "cap add android",
+    "cap:add:ios": "cap add ios",
     "cap:open:android": "cap open android",
     "cap:open:ios": "cap open ios",
     "cap:run:android": "cap run android",
@@ -27,9 +30,12 @@
     "@capacitor/push-notifications": "^8.0.0",
     "@capacitor/splash-screen": "^8.0.0",
     "@capacitor/status-bar": "^8.0.0",
-    "@capacitor/ios": "^8.0.0"
+    "@capacitor/ios": "^8.0.0",
+    "@supabase/supabase-js": "^2.0.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
-    "@capacitor/cli": "^8.0.0"
+    "@capacitor/cli": "^8.0.0",
+    "esbuild": "^0.25.0"
   }
 }
