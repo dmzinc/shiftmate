@@ -96,7 +96,113 @@ function openImport(id){const r=rotations.find(x=>x.id===id);selectedFile=null;p
 function norm(v){return String(v??"").toLowerCase().replace(/\s+/g," ").trim()}
 function cellDate(v){if(v instanceof Date)return v.toISOString().slice(0,10);if(typeof v==="number"){const d=XLSX.SSF.parse_date_code(v);if(d)return d.y+"-"+String(d.m).padStart(2,"0")+"-"+String(d.d).padStart(2,"0")}const s=String(v??"").trim();if(/^\d{4}-\d{2}-\d{2}/.test(s))return s.slice(0,10);const m=s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})$/);if(m){let y=+m[3];if(y<100)y+=2000;return y+"-"+String(+m[2]).padStart(2,"0")+"-"+String(+m[1]).padStart(2,"0")}return ""}
 function timeVal(v){if(typeof v==="number"){const mins=Math.round(v*1440)%1440;return String(Math.floor(mins/60)).padStart(2,"0")+":"+String(mins%60).padStart(2,"0")+":00"}let s=String(v??"").trim();const m=s.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);if(!m)return "";return String(+m[1]).padStart(2,"0")+":"+m[2]+":00"}
-async function readRotaFile(rotationId,file){if(!file)return;const feedback=$("importFeedback");feedback.classList.remove("hidden","error","success");feedback.textContent="Reading file…";try{const buf=await file.arrayBuffer();let wb;if(file.name.toLowerCase().endsWith(".csv")){const txt=new TextDecoder().decode(buf);wb=XLSX.read(txt,{type:"string",cellDates:true})}else wb=XLSX.read(buf,{type:"array",cellDates:true});let rows=[];for(const name of wb.SheetNames){const data=XLSX.utils.sheet_to_json(wb.Sheets[name],{defval:"",raw:true});rows.push(...data)}if(!rows.length)throw Error("No data rows found.");const keys=Object.keys(rows[0]);const find=(obj,terms)=>{const k=keys.find(k=>terms.includes(norm(k)));return k?obj[k]:""};const match=norm(profile.rota_matching_name||profile.full_name);if(!match)throw Error("Set your rota matching name in Profile before importing.");const extracted=[];for(const row of rows){const name=find(row,["name","staff name","employee name","doctor","employee","staff"]);if(norm(name)!==match)continue;const date=cellDate(find(row,["date","shift date","day","start date"]));const type=String(find(row,["shift","shift type","duty","description","code"])||"").trim();const start=timeVal(find(row,["start","start time","from","begin"]));const end=timeVal(find(row,["end","end time","to","finish"]));const ward=String(find(row,["ward","location","department","work area","site"])||"Not specified").trim();if(date&&type&&start&&end)extracted.push({shift_date:date,shift_type:type,start_time:start,end_time:end,ward})}const unique=[...new Map(extracted.map(x=>[JSON.stringify(x),x])).values()];if(!unique.length)throw Error("No matching shifts found. Check your rota matching name and ensure columns include Name, Date, Shift, Start, End and Ward/Location.");selectedFile=file;previewShifts=unique;feedback.classList.add("success");feedback.textContent="Found "+unique.length+" matching shift(s) for "+profile.rota_matching_name+". Only these rows will be imported.";const sample=unique.slice(0,5);$("previewArea").innerHTML='<div class="small muted" style="margin:10px 0">Preview of your shifts</div>'+sample.map(x=>'<div class="note small"><b>'+fmtDate(x.shift_date)+'</b> · '+esc(x.shift_type)+' · '+esc(x.start_time.slice(0,5))+'–'+esc(x.end_time.slice(0,5))+' · '+esc(x.ward)+'</div>').join("")+(unique.length>5?'<div class="small muted">and '+(unique.length-5)+' more…</div>':"");$("confirmImport").disabled=false}catch(e){feedback.classList.add("error");feedback.textContent=e.message;previewShifts=[];$("confirmImport").disabled=true}}
+function parseClockRange(value){
+ const text=String(value??"").replace(/\\s+/g," ").trim();
+ const m=text.match(/(\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)?)\\s*[-–to]+\\s*(\\d{1,2}(?::\\d{2})?\\s*(?:am|pm)?)/i);
+ if(!m)return null;
+ const cv=v=>{const z=v.trim().match(/^(\\d{1,2})(?::(\\d{2}))?\\s*(am|pm)?$/i);if(!z)return null;let h=+z[1],mi=+(z[2]||0),ap=(z[3]||"").toLowerCase();if(ap==="pm"&&h<12)h+=12;if(ap==="am"&&h===12)h=0;if(h>23||mi>59)return null;return String(h).padStart(2,"0")+":"+String(mi).padStart(2,"0")+":00"};
+ const a=cv(m[1]),b=cv(m[2]);return a&&b?{start:a,end:b}:null;
+}
+function dateFromCell(v){
+ if(v instanceof Date&&!isNaN(v))return v.getFullYear()+"-"+String(v.getMonth()+1).padStart(2,"0")+"-"+String(v.getDate()).padStart(2,"0");
+ return cellDate(v);
+}
+function normalName(v){return norm(v).replace(/[^a-z0-9]+/g," ").trim()}
+async function readRotaFile(rotationId,file){
+ if(!file)return;
+ const feedback=$("importFeedback");feedback.classList.remove("hidden","error","success");feedback.textContent="Inspecting worksheets and rota layout…";
+ $("confirmImport").disabled=true;previewShifts=[];
+ try{
+  const buf=await file.arrayBuffer();
+  const wb=file.name.toLowerCase().endsWith(".csv")?XLSX.read(new TextDecoder().decode(buf),{type:"string",cellDates:true}):XLSX.read(buf,{type:"array",cellDates:true});
+  const target=normalName(profile.rota_matching_name||profile.full_name);
+  if(!target)throw Error("Set your rota matching name in Profile before importing.");
+  const candidates=[];
+  const codeTimes={};
+  // Read code legends from any worksheet: code | description | time range.
+  for(const sn of wb.SheetNames){
+   const grid=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,defval:"",raw:true});
+   for(const row of grid){
+    for(let c=0;c<Math.min(row.length,4);c++){
+     const code=String(row[c]??"").trim();
+     if(!code||code.length>12)continue;
+     for(let j=c+1;j<Math.min(row.length,c+5);j++){
+      const range=parseClockRange(row[j]);
+      if(range)codeTimes[norm(code)]=range;
+     }
+    }
+   }
+  }
+  for(const sn of wb.SheetNames){
+   const grid=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,defval:"",raw:true});
+   if(!grid.length)continue;
+   const width=Math.max(...grid.map(r=>r.length));
+   // Identify likely date column from actual date density.
+   let dateCol=-1,bestDateCount=0;
+   for(let c=0;c<Math.min(width,8);c++){
+    const count=grid.slice(0,Math.min(grid.length,250)).filter(r=>dateFromCell(r[c])).length;
+    if(count>bestDateCount){bestDateCount=count;dateCol=c}
+   }
+   if(dateCol<0||bestDateCount<2)continue;
+   // Search the first 12 rows for the user's name in a column heading,
+   // including multi-row headers where a name is on a lower header line.
+   let staffCol=-1,staffRow=-1,bestNameScore=0;
+   for(let r=0;r<Math.min(12,grid.length);r++){
+    for(let c=0;c<width;c++){
+     const v=normalName(grid[r][c]);if(!v)continue;
+     const score=v===target?100:(v.includes(target)||target.includes(v)&&v.length>5?75:0);
+     if(score>bestNameScore){bestNameScore=score;staffCol=c;staffRow=r}
+    }
+   }
+   const rows=[];
+   // Layout A: dates down rows, staff member in a column header.
+   if(staffCol>=0&&staffCol!==dateCol&&bestNameScore>=75){
+    for(let r=0;r<grid.length;r++){
+     const date=dateFromCell(grid[r][dateCol]);if(!date)continue;
+     const raw=String(grid[r][staffCol]??"").trim();if(!raw)continue;
+     const code=raw.replace(/\\s+/g," ");
+     if(/^(off|annual leave|a\\/l|s\\/l|study leave|rest|blank|-)$/i.test(code))continue;
+     let range=codeTimes[norm(code)];
+     // Prefer explicit shift times found elsewhere in the same row.
+     for(const cell of grid[r]){const candidate=parseClockRange(cell);if(candidate){range=candidate;break}}
+     rows.push({date,code,range,ward:sn});
+    }
+   }else{
+    // Layout B: names appear in assignment cells; each assignment column
+    // represents a duty/role, and date rows identify the day.
+    for(let r=0;r<grid.length;r++){
+     const date=dateFromCell(grid[r][dateCol]);if(!date)continue;
+     for(let c=0;c<width;c++){
+      if(c===dateCol)continue;
+      const raw=String(grid[r][c]??"").trim();if(!raw)continue;
+      const person=normalName(raw);
+      if(!(person===target||(person.length>8&&target.includes(person))||(target.length>8&&person.includes(target))))continue;
+      const header=String(grid[0]?.[c]??"").trim()||String(grid[Math.max(0,r-1)]?.[c]??"").trim()||"Assigned duty";
+      let range=null;
+      for(let hr=Math.max(0,r-4);hr<r;hr++){range=parseClockRange(grid[hr]?.[c]);if(range)break}
+      rows.push({date,code:header,range,ward:sn});
+     }
+    }
+   }
+   if(rows.length)candidates.push({sheet:sn,rows,matched:bestNameScore>=75});
+  }
+  if(!candidates.length)throw Error("No matching shifts could be identified. We inspected "+wb.SheetNames.length+" worksheets. Try setting your rota matching name exactly as it appears in the workbook, or choose a worksheet containing dated assignments.");
+  // Use the best-matching sheet, never silently combine unrelated worksheets.
+  candidates.sort((a,b)=>(b.matched?1:0)-(a.matched?1:0)||b.rows.length-a.rows.length);
+  const chosen=candidates[0];
+  const missing=chosen.rows.filter(x=>!x.range);
+  if(missing.length){
+   const codes=[...new Set(missing.map(x=>x.code))].slice(0,8).join(", ");
+   throw Error("Found "+chosen.rows.length+" possible assignments in worksheet '"+chosen.sheet+"', but "+missing.length+" have no verified start/end times. ShiftMate will not invent shift times. The next importer update needs a shift-code mapping step for: "+codes+".");
+  }
+  const unique=[...new Map(chosen.rows.map(x=>[x.date+"|"+x.code+"|"+x.range.start+"|"+x.range.end,x])).values()];
+  previewShifts=unique.map(x=>({shift_date:x.date,shift_type:x.code,start_time:x.range.start,end_time:x.range.end,ward:x.ward}));
+  if(!previewShifts.length)throw Error("The matching worksheet did not contain any working shifts for "+(profile.rota_matching_name||profile.full_name)+".");
+  selectedFile=file;feedback.classList.add("success");feedback.textContent="Found "+previewShifts.length+" possible shift(s) in '"+chosen.sheet+"'. Review the preview before importing.";
+  $("previewArea").innerHTML='<div class="small muted" style="margin:10px 0">Preview · '+esc(chosen.sheet)+'</div>'+previewShifts.slice(0,8).map(x=>'<div class="note small"><b>'+fmtDate(x.shift_date)+'</b> · '+esc(x.shift_type)+' · '+esc(x.start_time.slice(0,5))+'–'+esc(x.end_time.slice(0,5))+'</div>').join("")+(previewShifts.length>8?'<div class="small muted">and '+(previewShifts.length-8)+' more…</div>':"");
+  $("confirmImport").disabled=false;
+ }catch(e){feedback.classList.add("error");feedback.textContent=e.message;previewShifts=[];$("confirmImport").disabled=true}
+}
 async function confirmImport(id){if(!previewShifts.length)return;const btn=$("confirmImport");btn.disabled=true;btn.textContent="Importing…";try{const {data,error}=await sb.rpc("confirm_rota_import",{p_rotation_id:id,p_filename:selectedFile.name,p_shifts:previewShifts});if(error)throw error;closeModal();await loadData();navigate("rota");alert("Import complete: "+(data.imported_count||0)+" added/updated, "+(data.duplicate_count||0)+" duplicates skipped.")}catch(e){alert("Import failed: "+e.message);btn.disabled=false;btn.textContent="Confirm import"}}
 async function openShift(id){const s=shifts.find(x=>x.id===id);if(!s)return;const rot=rotations.find(r=>r.id===s.rotation_id);modal("Shift details",'<div class="notice">'+esc(rot?.specialty||"Rotation")+'</div><h3 style="margin:12px 0 4px">'+esc(s.shift_type)+'</h3><div class="muted">'+fmtDate(s.shift_date)+' · '+esc(s.start_time.slice(0,5))+'–'+esc(s.end_time.slice(0,5))+'</div><p>'+esc(s.ward)+'</p><div class="section-head"><h2>Private notes</h2><span class="small muted">Only you can see these</span></div><div id="notesList">Loading notes…</div><div class="field"><label>Add a note</label><input id="newNote" placeholder="Write a reminder or handover note…"></div><button class="btn" onclick="addNote(\''+id+'\')">Add note</button>','<button class="btn secondary" onclick="closeModal()">Close</button>');await loadNotes(id)}
 async function loadNotes(id){const q=await sb.from("shift_notes").select("*").eq("shift_id",id).eq("user_id",user.id).order("created_at");if(q.error){$("notesList").textContent=q.error.message;return}$("notesList").innerHTML=q.data.length?q.data.map(n=>'<div class="note"><div id="noteText'+n.id+'">'+esc(n.body)+'</div><div class="note-actions"><button class="btn ghost small" onclick="editNote(\''+n.id+'\',\''+id+'\')">Edit</button><button class="btn ghost small" onclick="deleteNote(\''+n.id+'\',\''+id+'\')">Delete</button></div></div>').join(""):'<div class="small muted">No notes yet. Add your first note below.</div>'}
