@@ -3,7 +3,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
 const config: CapacitorConfig = {
   appId: 'com.shiftmate.app',
   appName: 'ShiftMate',
-  webDir: '.',
+  webDir: 'www',
   bundledWebRuntime: false,
   backgroundColor: '#f6f8fb',
   ios: {
