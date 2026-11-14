@@ -129,7 +129,25 @@ function inspectRotaWorkbook(wb){
    if(!/[a-z]/i.test(raw))continue;
    people.set(raw,(people.get(raw)||0)+1);
   }
-  sheets.push({name,grid,width,dateCol,dateRows,people:[...people].sort((a,b)=>a[0].localeCompare(b[0]))});
+  // Also support staff names in column headings, with short shift codes under each name.
+  const staffColumns=new Map();
+  const firstDateRow=dateRows[0]?.r||0;
+  for(let c=0;c<width;c++){
+   if(c===dateCol)continue;
+   const sample=dateRows.slice(0,Math.min(40,dateRows.length)).map(x=>String(grid[x.r]?.[c]??"").trim()).filter(Boolean);
+   const coded=sample.filter(x=>x.length<=16&&/^[A-Za-z0-9/ -]+$/.test(x)).length;
+   if(sample.length<3||coded/sample.length<0.7)continue;
+   for(let hr=Math.max(0,firstDateRow-4);hr<firstDateRow;hr++){
+    const raw=String(grid[hr]?.[c]??"").replace(/\s+/g," ").trim();
+    const key=normalName(raw);
+    if(raw.length<6||ignored.has(key)||!/[a-z]{2,}.*[a-z]{2,}/i.test(raw))continue;
+    if(/^(FY|SHO|ST\d|GI |UGI|LGI|NHS|GENERAL|AUG|DEC|APR|FEB|MON|TUE|WED|THU|FRI)/i.test(raw))continue;
+    if(/\b(?:on.call|ward cover|clerking|roster|rota|weekend|staff|name|date|day|working|theatre)\b/i.test(raw))continue;
+    staffColumns.set(raw,c);people.set(raw,(people.get(raw)||0)+sample.length);
+    break;
+   }
+  }
+  sheets.push({name,grid,width,dateCol,dateRows,staffColumns,people:[...people].sort((a,b)=>a[0].localeCompare(b[0]))});
  }
  return sheets;
 }
@@ -149,6 +167,15 @@ function buildSelectedRotaPreview(){
    let range=null;
    for(let hr=1;hr<=Math.min(4,sheet.grid.length-1);hr++){const candidate=parseClockRange(sheet.grid[hr]?.[c]);if(candidate){range=candidate;break}}
    rows.push({date,code:duty,range,ward:sheet.name});
+  }
+ }
+ // Date rows can also contain shift codes under a named staff column.
+ for(const [staffName,col] of sheet.staffColumns||[]){
+  if(!rotaPersonMatch(staffName,person))continue;
+  for(const {r,date} of sheet.dateRows){
+   const code=String(sheet.grid[r]?.[col]??"").replace(/\s+/g," ").trim();
+   if(!code||ignored.has(normalName(code))||code.length>60)continue;
+   rows.push({date,code,range:parseClockRange(code),ward:sheet.name});
   }
  }
  const unique=[...new Map(rows.map(x=>[x.date+"|"+x.code,x])).values()];
