@@ -92,98 +92,119 @@ function dateFromCell(v){
  return cellDate(v);
 }
 function normalName(v){return norm(v).replace(/[^a-z0-9]+/g," ").trim()}
+let rotaImportState=null;
+function rotaPersonMatch(raw,selected){
+ const p=normalName(raw),t=normalName(selected);
+ if(!p||!t)return false;
+ return p===t||p.startsWith(t+" ")||t.startsWith(p+" ")||p.includes(t);
+}
+function inspectRotaWorkbook(wb){
+ const sheets=[];
+ const ignored=new Set(["off","0ff","a l","s l","annual leave","study leave","sick leave","day","night","oncall","theatre","sdt","nwd","b h","bank holiday","rest","nil","none"]);
+ for(const name of wb.SheetNames){
+  const grid=XLSX.utils.sheet_to_json(wb.Sheets[name],{header:1,defval:"",raw:true});
+  const width=Math.max(0,...grid.map(r=>r.length));
+  let dateCol=-1,best=0;
+  for(let c=0;c<width;c++){
+   const count=grid.reduce((n,row)=>n+(dateFromCell(row[c])?1:0),0);
+   if(count>best){best=count;dateCol=c}
+  }
+  if(dateCol<0||best<2)continue;
+  const dateRows=[];
+  for(let r=0;r<grid.length;r++){const date=dateFromCell(grid[r][dateCol]);if(date)dateRows.push({r,date})}
+  const people=new Map();
+  for(const {r} of dateRows)for(let c=0;c<width;c++){
+   if(c===dateCol)continue;
+   const raw=String(grid[r][c]??"").replace(/\s+/g," ").trim();
+   const key=normalName(raw);
+   if(!raw||ignored.has(key)||raw.length<4||/^\d/.test(raw)||parseClockRange(raw))continue;
+   if(!/[a-z]/i.test(raw))continue;
+   people.set(raw,(people.get(raw)||0)+1);
+  }
+  sheets.push({name,grid,width,dateCol,dateRows,people:[...people].sort((a,b)=>a[0].localeCompare(b[0]))});
+ }
+ return sheets;
+}
+function buildSelectedRotaPreview(){
+ const state=rotaImportState;if(!state)return;
+ const sheet=state.sheets.find(x=>x.name===$("rotaSheetChoice")?.value);
+ const person=$("rotaPersonChoice")?.value;
+ if(!sheet||!person)return;
+ const rows=[];
+ const ignored=new Set(["off","0ff","a l","s l","annual leave","study leave","sick leave","day","night","oncall","theatre","sdt","nwd","b h","bank holiday","rest","nil","none"]);
+ for(const {r,date} of sheet.dateRows){
+  for(let c=0;c<sheet.width;c++){
+   if(c===sheet.dateCol)continue;
+   const raw=String(sheet.grid[r][c]??"").replace(/\s+/g," ").trim();
+   if(!rotaPersonMatch(raw,person)||ignored.has(normalName(raw)))continue;
+   const duty=String(sheet.grid[0]?.[c]??"").trim()||"Assigned duty";
+   let range=null;
+   for(let hr=1;hr<=Math.min(4,sheet.grid.length-1);hr++){const candidate=parseClockRange(sheet.grid[hr]?.[c]);if(candidate){range=candidate;break}}
+   rows.push({date,code:duty,range,ward:sheet.name});
+  }
+ }
+ const unique=[...new Map(rows.map(x=>[x.date+"|"+x.code,x])).values()];
+ previewShifts=unique.map(x=>({shift_date:x.date,shift_type:x.code,start_time:x.range?.start||"",end_time:x.range?.end||"",ward:x.ward}));
+ const feedback=$("importFeedback");
+ if(!previewShifts.length){
+  feedback.classList.remove("success");feedback.classList.add("error");
+  feedback.textContent="No dated assignments were found for "+person+" on worksheet '"+sheet.name+"'. Try another worksheet or staff name.";
+  $("confirmImport").disabled=true;return;
+ }
+ const unresolved=[...new Set(previewShifts.filter(x=>!x.start_time||!x.end_time).map(x=>x.shift_type))];
+ feedback.classList.remove("error");feedback.classList.add("success");
+ feedback.textContent="Found "+previewShifts.length+" assignment(s) for "+person+" in '"+sheet.name+"'. Review and add any missing shift times.";
+ const codeFields=unresolved.map((code,i)=>'<div class="card" style="padding:12px;margin:8px 0"><b>'+esc(code)+'</b><div class="grid" style="grid-template-columns:1fr 1fr;gap:8px"><div class="field"><label>Start time</label><input type="time" id="codeStart'+i+'"></div><div class="field"><label>End time</label><input type="time" id="codeEnd'+i+'"></div></div></div>').join("");
+ $("previewArea").innerHTML='<div class="field"><label>Worksheet</label><select id="rotaSheetChoice" onchange="onRotaChoiceChange()">'+state.sheets.map(x=>'<option value="'+esc(x.name)+'" '+(x.name===sheet.name?'selected':'')+'>'+esc(x.name)+'</option>').join("")+'</select></div><div class="field"><label>Doctor / staff member</label><select id="rotaPersonChoice" onchange="onRotaChoiceChange()">'+sheet.people.map(x=>'<option value="'+esc(x[0])+'" '+(x[0]===person?'selected':'')+'>'+esc(x[0])+'</option>').join("")+'</select></div>'+(unresolved.length?'<div class="small muted">Add times for duties where the workbook does not provide them. You can leave both blank and edit the shift later.</div>'+codeFields:"")+'<div class="small muted" style="margin:10px 0">Preview · '+esc(sheet.name)+' · '+esc(person)+'</div>'+previewShifts.slice(0,15).map(x=>'<div class="note small"><b>'+fmtDate(x.shift_date)+'</b> · '+esc(x.shift_type)+' · '+(x.start_time?esc(x.start_time.slice(0,5))+'–'+esc(x.end_time.slice(0,5)):'<i>Time not set</i>')+'</div>').join("")+(previewShifts.length>15?'<div class="small muted">and '+(previewShifts.length-15)+' more…</div>':"");
+ $("confirmImport").disabled=false;
+}
+function onRotaChoiceChange(){
+ const state=rotaImportState;if(!state)return;
+ const oldSheet=$("rotaSheetChoice")?.value;
+ const sheet=state.sheets.find(x=>x.name===oldSheet)||state.sheets[0];
+ const personSelect=$("rotaPersonChoice");
+ const current=personSelect?.value;
+ if(!personSelect||!sheet.people.length){
+  const p=sheet.people[0]?.[0]||"";
+  $("previewArea").innerHTML='<div class="field"><label>Worksheet</label><select id="rotaSheetChoice" onchange="onRotaChoiceChange()">'+state.sheets.map(x=>'<option value="'+esc(x.name)+'">'+esc(x.name)+'</option>').join("")+'</select></div><p>No staff names detected on this worksheet.</p>';
+  $("confirmImport").disabled=true;return;
+ }
+ const person=sheet.people.some(x=>x[0]===current)?current:sheet.people[0][0];
+ buildSelectedRotaPreviewFor(sheet.name,person);
+}
+function buildSelectedRotaPreviewFor(sheetName,person){
+ const state=rotaImportState;if(!state)return;
+ const sheet=state.sheets.find(x=>x.name===sheetName);if(!sheet)return;
+ $("previewArea").innerHTML='<div class="field"><label>Worksheet</label><select id="rotaSheetChoice" onchange="onRotaChoiceChange()">'+state.sheets.map(x=>'<option value="'+esc(x.name)+'" '+(x.name===sheetName?'selected':'')+'>'+esc(x.name)+'</option>').join("")+'</select></div><div class="field"><label>Doctor / staff member</label><select id="rotaPersonChoice" onchange="onRotaChoiceChange()">'+sheet.people.map(x=>'<option value="'+esc(x[0])+'" '+(x[0]===person?'selected':'')+'>'+esc(x[0])+'</option>').join("")+'</select></div>';
+ buildSelectedRotaPreview();
+}
 async function readRotaFile(rotationId,file){
  if(!file)return;
- const feedback=$("importFeedback");feedback.classList.remove("hidden","error","success");feedback.textContent="Inspecting worksheets and rota layout…";
- $("confirmImport").disabled=true;previewShifts=[];
+ const feedback=$("importFeedback");feedback.classList.remove("hidden","error","success");feedback.textContent="Inspecting worksheets and staff assignments…";
+ $("confirmImport").disabled=true;previewShifts=[];rotaImportState=null;
  try{
   const buf=await file.arrayBuffer();
   const wb=file.name.toLowerCase().endsWith(".csv")?XLSX.read(new TextDecoder().decode(buf),{type:"string",cellDates:true}):XLSX.read(buf,{type:"array",cellDates:true});
-  const target=normalName(profile.rota_matching_name||profile.full_name);
-  if(!target)throw Error("Set your rota matching name in Profile before importing.");
-  const candidates=[];
-  const codeTimes={};
-  // Read code legends from any worksheet: code | description | time range.
-  for(const sn of wb.SheetNames){
-   const grid=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,defval:"",raw:true});
-   for(const row of grid){
-    for(let c=0;c<Math.min(row.length,4);c++){
-     const code=String(row[c]??"").trim();
-     if(!code||code.length>12)continue;
-     for(let j=c+1;j<Math.min(row.length,c+5);j++){
-      const range=parseClockRange(row[j]);
-      if(range)codeTimes[norm(code)]=range;
-     }
-    }
-   }
+  const sheets=inspectRotaWorkbook(wb);
+  if(!sheets.length)throw Error("No worksheets with dated rows were detected. Please check that the workbook contains real Excel dates.");
+  const target=normalName(profile.rota_matching_name||profile.full_name||"");
+  rotaImportState={sheets,file,rotationId};
+  let selectedSheet=null,selectedPerson=null,bestScore=0;
+  for(const sh of sheets)for(const [person] of sh.people){
+   const p=normalName(person);
+   const score=p===target?100:(target&&(p.includes(target)||target.includes(p))?75:0);
+   if(score>bestScore){bestScore=score;selectedSheet=sh;selectedPerson=person}
   }
-  for(const sn of wb.SheetNames){
-   const grid=XLSX.utils.sheet_to_json(wb.Sheets[sn],{header:1,defval:"",raw:true});
-   if(!grid.length)continue;
-   const width=Math.max(...grid.map(r=>r.length));
-   // Identify likely date column from actual date density.
-   let dateCol=-1,bestDateCount=0;
-   for(let c=0;c<Math.min(width,8);c++){
-    const count=grid.slice(0,Math.min(grid.length,250)).filter(r=>dateFromCell(r[c])).length;
-    if(count>bestDateCount){bestDateCount=count;dateCol=c}
-   }
-   if(dateCol<0||bestDateCount<2)continue;
-   // Search the first 12 rows for the user's name in a column heading,
-   // including multi-row headers where a name is on a lower header line.
-   let staffCol=-1,staffRow=-1,bestNameScore=0;
-   for(let r=0;r<Math.min(12,grid.length);r++){
-    for(let c=0;c<width;c++){
-     const v=normalName(grid[r][c]);if(!v)continue;
-     const score=v===target?100:(v.includes(target)||target.includes(v)&&v.length>5?75:0);
-     if(score>bestNameScore){bestNameScore=score;staffCol=c;staffRow=r}
-    }
-   }
-   const rows=[];
-   // Layout A: dates down rows, staff member in a column header.
-   if(staffCol>=0&&staffCol!==dateCol&&bestNameScore>=75){
-    for(let r=0;r<grid.length;r++){
-     const date=dateFromCell(grid[r][dateCol]);if(!date)continue;
-     const raw=String(grid[r][staffCol]??"").trim();if(!raw)continue;
-     const code=raw.replace(/\s+/g," ");
-     if(/^(off|annual leave|a\/l|s\/l|study leave|rest|blank|-)$/i.test(code))continue;
-     let range=codeTimes[norm(code)];
-     // Prefer explicit shift times found elsewhere in the same row.
-     for(const cell of grid[r]){const candidate=parseClockRange(cell);if(candidate){range=candidate;break}}
-     rows.push({date,code,range,ward:sn});
-    }
-   }else{
-    // Layout B: names appear in assignment cells; each assignment column
-    // represents a duty/role, and date rows identify the day.
-    for(let r=0;r<grid.length;r++){
-     const date=dateFromCell(grid[r][dateCol]);if(!date)continue;
-     for(let c=0;c<width;c++){
-      if(c===dateCol)continue;
-      const raw=String(grid[r][c]??"").trim();if(!raw)continue;
-      const person=normalName(raw);
-      if(!(person===target||(person.length>8&&target.includes(person))||(target.length>8&&person.includes(target))))continue;
-      const header=String(grid[0]?.[c]??"").trim()||String(grid[Math.max(0,r-1)]?.[c]??"").trim()||"Assigned duty";
-      let range=null;
-      for(let hr=Math.max(0,r-4);hr<r;hr++){range=parseClockRange(grid[hr]?.[c]);if(range)break}
-      rows.push({date,code:header,range,ward:sn});
-     }
-    }
-   }
-   if(rows.length)candidates.push({sheet:sn,rows,matched:bestNameScore>=75});
+  if(!selectedSheet)selectedSheet=sheets.find(x=>x.people.length)||sheets[0];
+  if(!selectedPerson)selectedPerson=selectedSheet.people[0]?.[0]||"";
+  if(!selectedPerson){
+   feedback.classList.add("error");feedback.textContent="We found dated worksheets but could not identify staff names. Choose a worksheet with staff assignments or add shifts manually.";
+   $("previewArea").innerHTML=sheets.map(x=>'<div class="note small">'+esc(x.name)+' · '+x.dateRows.length+' dated rows · '+x.people.length+' possible names</div>').join("");
+   return;
   }
-  if(!candidates.length)throw Error("No matching shifts could be identified. We inspected "+wb.SheetNames.length+" worksheets. Try setting your rota matching name exactly as it appears in the workbook, or choose a worksheet containing dated assignments.");
-  // Use the best-matching sheet, never silently combine unrelated worksheets.
-  candidates.sort((a,b)=>(b.matched?1:0)-(a.matched?1:0)||b.rows.length-a.rows.length);
-  const chosen=candidates[0];
-  const unique=[...new Map(chosen.rows.map(x=>[x.date+"|"+x.code+"|"+(x.range?.start||"")+"|"+(x.range?.end||""),x])).values()];
-  previewShifts=unique.map(x=>({shift_date:x.date,shift_type:x.code,start_time:x.range?.start||"",end_time:x.range?.end||"",ward:x.ward}));
-  if(!previewShifts.length)throw Error("The matching worksheet did not contain any working shifts for "+(profile.rota_matching_name||profile.full_name)+".");
   selectedFile=file;
-  const unresolved=[...new Set(previewShifts.filter(x=>!x.start_time||!x.end_time).map(x=>x.shift_type))];
-  feedback.classList.add("success");
-  feedback.textContent="Found "+previewShifts.length+" possible shift(s) in '"+chosen.sheet+"'. "+(unresolved.length?"Please assign times to the shift codes below before importing.":"Review the preview before importing.");
-  const codeFields=unresolved.map((code,i)=>'<div class="card" style="padding:12px;margin:8px 0"><b>'+esc(code)+'</b><div class="grid" style="grid-template-columns:1fr 1fr;gap:8px"><div class="field"><label>Start time</label><input type="time" id="codeStart'+i+'"></div><div class="field"><label>End time</label><input type="time" id="codeEnd'+i+'"></div></div><input type="hidden" id="codeValue'+i+'" value="'+esc(code)+'"></div>').join("");
-  $("previewArea").innerHTML=(unresolved.length?'<div class="small muted" style="margin:12px 0">Set the times for each shift code. These times will be applied to all matching shifts in this import.</div>'+codeFields:'')+'<div class="small muted" style="margin:10px 0">Preview · '+esc(chosen.sheet)+'</div>'+previewShifts.slice(0,12).map(x=>'<div class="note small"><b>'+fmtDate(x.shift_date)+'</b> · '+esc(x.shift_type)+' · '+(x.start_time?esc(x.start_time.slice(0,5))+'–'+esc(x.end_time.slice(0,5)):'<i>Times to be assigned</i>')+'</div>').join("")+(previewShifts.length>12?'<div class="small muted">and '+(previewShifts.length-12)+' more…</div>':"");
-  $("confirmImport").disabled=false;
+  feedback.classList.add("success");feedback.textContent="Detected "+sheets.length+" dated worksheet(s). Select the correct worksheet and doctor below.";
+  buildSelectedRotaPreviewFor(selectedSheet.name,selectedPerson);
  }catch(e){
   feedback.classList.remove("success");feedback.classList.add("error");feedback.textContent=e.message||"Unable to read this rota file.";
   previewShifts=[];$("confirmImport").disabled=true;
