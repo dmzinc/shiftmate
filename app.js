@@ -93,6 +93,13 @@ function dateFromCell(v){
 }
 function normalName(v){return norm(v).replace(/[^a-z0-9]+/g," ").trim()}
 let rotaImportState=null;
+function validRotaDate(value){
+ if(typeof value==="number"&&(value<36526||value>73050))return "";
+ const date=dateFromCell(value);
+ if(!/^20\d{2}-\d{2}-\d{2}$/.test(date))return "";
+ const parsed=new Date(date+"T12:00:00Z");
+ return !isNaN(parsed)&&parsed.toISOString().slice(0,10)===date?date:"";
+}
 function rotaPersonMatch(raw,selected){
  const p=normalName(raw),t=normalName(selected);
  if(!p||!t)return false;
@@ -100,18 +107,19 @@ function rotaPersonMatch(raw,selected){
 }
 function inspectRotaWorkbook(wb){
  const sheets=[];
- const ignored=new Set(["off","0ff","a l","s l","annual leave","study leave","sick leave","day","night","oncall","theatre","sdt","nwd","b h","bank holiday","rest","nil","none"]);
+ const ignored=new Set(["off","0ff","a l","s l","annual leave","study leave","sick leave","day","night","oncall","theatre","sdt","nwd","b h","bank holiday","rest","nil","none","monday","tuesday","wednesday","thursday","friday","saturday","sunday","mon","tue","wed","thu","fri","sat","sun"]);
  for(const name of wb.SheetNames){
   const grid=XLSX.utils.sheet_to_json(wb.Sheets[name],{header:1,defval:"",raw:true});
   const width=Math.max(0,...grid.map(r=>r.length));
+  if(grid.length>30000||width>300)continue;
   let dateCol=-1,best=0;
   for(let c=0;c<width;c++){
-   const count=grid.reduce((n,row)=>n+(dateFromCell(row[c])?1:0),0);
+   const count=grid.reduce((n,row)=>n+(validRotaDate(row[c])?1:0),0);
    if(count>best){best=count;dateCol=c}
   }
   if(dateCol<0||best<2)continue;
   const dateRows=[];
-  for(let r=0;r<grid.length;r++){const date=dateFromCell(grid[r][dateCol]);if(date)dateRows.push({r,date})}
+  for(let r=0;r<grid.length;r++){const date=validRotaDate(grid[r][dateCol]);if(date)dateRows.push({r,date})}
   const people=new Map();
   for(const {r} of dateRows)for(let c=0;c<width;c++){
    if(c===dateCol)continue;
@@ -169,7 +177,7 @@ function onRotaChoiceChange(){
   $("previewArea").innerHTML='<div class="field"><label>Worksheet</label><select id="rotaSheetChoice" onchange="onRotaChoiceChange()">'+state.sheets.map(x=>'<option value="'+esc(x.name)+'">'+esc(x.name)+'</option>').join("")+'</select></div><p>No staff names detected on this worksheet.</p>';
   $("confirmImport").disabled=true;return;
  }
- const person=sheet.people.some(x=>x[0]===current)?current:sheet.people[0][0];
+ const person=sheet.people.some(x=>x[0]===current)?current:(sheet.people.find(x=>rotaPersonMatch(x[0],profile.rota_matching_name||profile.full_name))?.[0]||sheet.people[0][0]);
  buildSelectedRotaPreviewFor(sheet.name,person);
 }
 function buildSelectedRotaPreviewFor(sheetName,person){
@@ -183,6 +191,7 @@ async function readRotaFile(rotationId,file){
  const feedback=$("importFeedback");feedback.classList.remove("hidden","error","success");feedback.textContent="Inspecting worksheets and staff assignments…";
  $("confirmImport").disabled=true;previewShifts=[];rotaImportState=null;
  try{
+  if(file.size>20*1024*1024)throw Error("Rota exceeds the 20 MB file-size limit.");
   const buf=await file.arrayBuffer();
   const wb=file.name.toLowerCase().endsWith(".csv")?XLSX.read(new TextDecoder().decode(buf),{type:"string",cellDates:true}):XLSX.read(buf,{type:"array",cellDates:true});
   const sheets=inspectRotaWorkbook(wb);
@@ -216,8 +225,8 @@ async function confirmImport(id){
  try{
   const unresolved=[...new Set(previewShifts.filter(x=>!x.start_time||!x.end_time).map(x=>x.shift_type))];
   const mappings={};
-  unresolved.forEach((code,i)=>{const start=$("codeStart"+i)?.value||"",end=$("codeEnd"+i)?.value||"";if(!start||!end)throw Error("Enter both start and end times for shift code "+code+".");mappings[code]={start_time:start+":00",end_time:end+":00"}});
-  const payload=previewShifts.map(x=>({...x,...(mappings[x.shift_type]||{})}));
+  unresolved.forEach((code,i)=>{const start=$("codeStart"+i)?.value||"",end=$("codeEnd"+i)?.value||"";if(Boolean(start)!==Boolean(end))throw Error("Enter both start and end times for "+code+", or leave both blank.");mappings[code]={start_time:start?start+":00":null,end_time:end?end+":00":null}});
+  const payload=previewShifts.map(x=>({...x,...(mappings[x.shift_type]||{}),start_time:x.start_time||mappings[x.shift_type]?.start_time||null,end_time:x.end_time||mappings[x.shift_type]?.end_time||null}));
   const {data,error}=await sb.rpc("confirm_rota_import",{p_rotation_id:id,p_filename:selectedFile.name,p_shifts:payload});
   if(error)throw error;
   closeModal();await loadData();navigate("rota");alert("Import complete: "+(data.imported_count||0)+" added/updated, "+(data.duplicate_count||0)+" duplicates skipped.");
