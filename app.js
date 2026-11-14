@@ -103,7 +103,7 @@ function validRotaDate(value){
 function rotaNameScore(sheetName,profileName){
  const sheetTokens=normalName(sheetName).split(" ").filter(Boolean);
  const profileTokens=normalName(profileName).split(" ").filter(Boolean);
- if(!sheetTokens.length||!profileTokens.length)return 0;
+ if(!sheetTokens.length||profileTokens.length<2)return 0;
  // Treat the profile name as the identifying core: every profile token
  // must appear in the sheet name, while additional middle names are allowed.
  if(!profileTokens.every(token=>sheetTokens.includes(token)))return 0;
