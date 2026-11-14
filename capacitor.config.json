@@ -1,0 +1,28 @@
+{
+  "appId": "com.shiftmate.app",
+  "appName": "ShiftMate",
+  "webDir": "www",
+  "backgroundColor": "#f6f8fb",
+  "ios": {
+    "contentInset": "automatic",
+    "preferredContentMode": "mobile"
+  },
+  "android": {
+    "allowMixedContent": false
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 1200,
+      "backgroundColor": "#f6f8fb",
+      "showSpinner": false
+    },
+    "StatusBar": {
+      "backgroundColor": "#f6f8fb",
+      "style": "DARK"
+    },
+    "Keyboard": {
+      "resize": "body",
+      "style": "LIGHT"
+    }
+  }
+}
