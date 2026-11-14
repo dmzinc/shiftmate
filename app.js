@@ -142,7 +142,7 @@ function inspectRotaWorkbook(wb){
     const key=normalName(raw);
     if(raw.length<6||ignored.has(key)||!/[a-z]{2,}.*[a-z]{2,}/i.test(raw))continue;
     if(/^(FY|SHO|ST\d|GI |UGI|LGI|NHS|GENERAL|AUG|DEC|APR|FEB|MON|TUE|WED|THU|FRI)/i.test(raw))continue;
-    if(/\b(?:on.call|ward cover|clerking|roster|rota|weekend|staff|name|date|day|working|theatre)\b/i.test(raw))continue;
+    if(/\b(?:on.call|ward cover|clerking|roster|rota|weekend|week.days?|staff|name|date|days?|working|theatre|bank.hol)\b/i.test(raw))continue;
     staffColumns.set(raw,c);people.set(raw,(people.get(raw)||0)+sample.length);
     break;
    }
@@ -165,7 +165,17 @@ function buildSelectedRotaPreview(){
    if(!rotaPersonMatch(raw,person)||ignored.has(normalName(raw)))continue;
    const duty=String(sheet.grid[0]?.[c]??"").trim()||"Assigned duty";
    let range=null;
-   for(let hr=1;hr<=Math.min(4,sheet.grid.length-1);hr++){const candidate=parseClockRange(sheet.grid[hr]?.[c]);if(candidate){range=candidate;break}}
+   const dayOfWeek=new Date(date+"T12:00:00Z").getUTCDay();
+   const weekend=dayOfWeek===0||dayOfWeek===6;
+   // The same role may have different weekday and weekend hours.
+   const headerRows=[];
+   for(let hr=1;hr<=Math.min(5,sheet.grid.length-1);hr++){
+    const label=String(sheet.grid[hr]?.[0]??"").toLowerCase();
+    const candidate=parseClockRange(sheet.grid[hr]?.[c]);
+    if(candidate)headerRows.push({label,range:candidate});
+   }
+   const suitable=headerRows.find(x=>weekend?/weekend|bank hol/.test(x.label):/week ?days?/.test(x.label));
+   range=suitable?.range||headerRows.find(x=>!/weekend|bank hol/.test(x.label))?.range||headerRows[0]?.range||null;
    rows.push({date,code:duty,range,ward:sheet.name});
   }
  }
