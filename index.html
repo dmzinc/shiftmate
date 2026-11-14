@@ -200,7 +200,10 @@ async function readRotaFile(rotationId,file){
   const codeFields=unresolved.map((code,i)=>'<div class="card" style="padding:12px;margin:8px 0"><b>'+esc(code)+'</b><div class="grid" style="grid-template-columns:1fr 1fr;gap:8px"><div class="field"><label>Start time</label><input type="time" id="codeStart'+i+'"></div><div class="field"><label>End time</label><input type="time" id="codeEnd'+i+'"></div></div><input type="hidden" id="codeValue'+i+'" value="'+esc(code)+'"></div>').join("");
   $("previewArea").innerHTML=(unresolved.length?'<div class="small muted" style="margin:12px 0">Set the times for each shift code. These times will be applied to all matching shifts in this import.</div>'+codeFields:'')+'<div class="small muted" style="margin:10px 0">Preview · '+esc(chosen.sheet)+'</div>'+previewShifts.slice(0,12).map(x=>'<div class="note small"><b>'+fmtDate(x.shift_date)+'</b> · '+esc(x.shift_type)+' · '+(x.start_time?esc(x.start_time.slice(0,5))+'–'+esc(x.end_time.slice(0,5)):'<i>Times to be assigned</i>')+'</div>').join("")+(previewShifts.length>12?'<div class="small muted">and '+(previewShifts.length-12)+' more…</div>':"");
   $("confirmImport").disabled=false;
-
+ }catch(e){
+  feedback.classList.remove("success");feedback.classList.add("error");feedback.textContent=e.message||"Unable to read this rota file.";
+  previewShifts=[];$("confirmImport").disabled=true;
+ }
 }
 async function confirmImport(id){
  if(!previewShifts.length)return;
