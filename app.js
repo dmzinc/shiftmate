@@ -60,7 +60,7 @@ async function submitAuth(){
  finally{$("authSubmit").disabled=false}
 }
 async function signOut(){await sb.auth.signOut();user=null;$("app").classList.add("hidden");$("auth").classList.remove("hidden")}
-async function boot(){const {data:{user:u}}=await sb.auth.getUser();if(!u)return;user=u;$("auth").classList.add("hidden");$("app").classList.remove("hidden");$("userPill").textContent=u.email;await loadData();navigate("home")}
+async function boot(){const {data:{user:u}}=await sb.auth.getUser();if(!u)return;user=u;$("auth").classList.add("hidden");$("app").classList.remove("hidden");$("userPill").textContent=u.email;await loadData();await scheduleShiftMoments();navigate("home")}
 async function loadData(){const [p,r,s]=await Promise.all([sb.from("profiles").select("*").eq("id",user.id).maybeSingle(),sb.from("rotations").select("*").eq("user_id",user.id).eq("archived",false).order("start_date",{ascending:false}),sb.from("shifts").select("*").eq("user_id",user.id).eq("archived",false).order("shift_date")]);if(p.error)throw p.error;if(r.error)throw r.error;if(s.error)throw s.error;profile=p.data;rotations=r.data||[];shifts=s.data||[];if(!profile){const x=await sb.from("profiles").insert({id:user.id,email:user.email,full_name:user.user_metadata?.full_name||"",rota_matching_name:user.user_metadata?.rota_matching_name||user.user_metadata?.full_name||""});if(x.error)throw x.error;const q=await sb.from("profiles").select("*").eq("id",user.id).single();profile=q.data}}
 function navigate(p){page=p;document.querySelectorAll(".nav-btn[data-page]").forEach(b=>b.classList.toggle("active",b.dataset.page===p));$("pageTitle").textContent=({home:"Overview",rota:"My rota",rotations:"Rotations",profile:"Profile"})[p];$("eyebrow").textContent=p==="profile"?"YOUR ACCOUNT":"YOUR WORKSPACE";render()}
 function motivationLocalDate(){
@@ -78,6 +78,48 @@ async function loadDailyMotivation(){
  const body=$("dailyMotivationBody");if(body)body.innerHTML='<span class="home-motivation-loading">Creating a fresh message for you…</span>';
  try{const {data,error}=await sb.functions.invoke("daily-motivation",{body:{}});if(error)throw error;if(!data?.motivation?.quote)throw new Error(data?.error||"No motivation was returned");const record={quote:data.motivation.quote,theme:data.motivation.theme,local_date:data.motivation.local_date};localStorage.setItem(key,JSON.stringify(record));localStorage.setItem(latestKey,JSON.stringify(record));renderMotivationQuote(record,"Your motivation for today")}catch(e){if(latest)renderMotivationQuote(latest,"Saved inspiration · today’s message is unavailable");else renderMotivationQuote({quote:"You don’t have to do everything today. Just take the next good step."},"A little encouragement");console.warn("Daily motivation unavailable:",e?.message||e)}
 }
+
+const MOMENT_IDS_KEY="shiftmate:moment-notification-ids:";
+function momentId(shiftId,kind){let n=0;for(const c of (shiftId+":"+kind))n=(n*31+c.charCodeAt(0))>>>0;return (n%2000000000)+1}
+function momentDateTime(date,time){if(!date||!time)return null;const d=new Date(date+"T"+String(time).slice(0,8));return Number.isNaN(d.getTime())?null:d}
+async function scheduleShiftMoments(){
+ if(!user||!profile)return;
+ const prefs={enabled:true,before:true,mid:true,after:true,advance_minutes:60,...(profile.shift_moments_settings||{})};
+ const storeKey=MOMENT_IDS_KEY+user.id;let old=[];try{old=JSON.parse(localStorage.getItem(storeKey)||"[]")}catch{}
+ const native=window.Capacitor?.Plugins?.LocalNotifications;
+ if(native&&old.length){try{await native.cancel({notifications:old.map(id=>({id}))})}catch(e){console.warn("Could not cancel old ShiftMate Moments",e)}}
+ const now=Date.now(),items=[];
+ if(prefs.enabled){
+  for(const shift of shifts){
+   const start=momentDateTime(shift.shift_date,shift.start_time),end=momentDateTime(shift.shift_date,shift.end_time);
+   if(!start||!end)continue;
+   if(end<=start)end.setDate(end.getDate()+1);
+   const candidates=[
+    {kind:"before",enabled:prefs.before,at:new Date(start.getTime()-Number(prefs.advance_minutes||60)*60000),title:"Your shift is coming up",body:"Take a breath, trust your preparation and step into today one moment at a time."},
+    {kind:"mid",enabled:prefs.mid,at:new Date(start.getTime()+(end.getTime()-start.getTime())/2),title:"A little encouragement",body:"One task at a time. The care and effort you give today matter."},
+    {kind:"after",enabled:prefs.after,at:new Date(end.getTime()),title:"You've made it through",body:"Whatever today brought, you showed up. Give yourself permission to rest."}
+   ];
+   for(const c of candidates){if(c.enabled&&c.at.getTime()>now+30000)items.push({id:momentId(shift.id,c.kind),title:c.title,body:c.body,at:c.at})}
+  }
+ }
+ const upcoming=items.slice(0,60);
+ if(native){
+  try{
+   const perm=await native.requestPermissions();
+   if(perm.display==="granted"||perm.granted===true){
+    if(upcoming.length)await native.schedule({notifications:upcoming.map(n=>({id:n.id,title:n.title,body:n.body,schedule:{at:n.at},extra:{kind:"shiftmate-moment"}}))});
+    localStorage.setItem(storeKey,JSON.stringify(upcoming.map(n=>n.id)));return;
+   }
+  }catch(e){console.warn("Native notification scheduling unavailable",e)}
+ }
+ localStorage.setItem(storeKey,JSON.stringify([]));
+ if("Notification"in window&&Notification.permission==="default"&&upcoming.length){try{await Notification.requestPermission()}catch{}}
+ if("Notification"in window&&Notification.permission==="granted"){
+  // Web fallback: timers work while this tab is active; native builds use persistent OS scheduling.
+  for(const n of upcoming){const delay=n.at.getTime()-Date.now();if(delay>0&&delay<2147480000)setTimeout(()=>{try{new Notification(n.title,{body:n.body,tag:"shiftmate-"+n.id})}catch{}},delay)}
+ }
+}
+
 function render(){if(page==="home")renderHome();if(page==="rotations")renderRotations();if(page==="rota")renderRota();if(page==="profile")renderProfile()}
 function fmtDate(d,opts={day:"numeric",month:"short",year:"numeric"}){return new Date(d+"T12:00:00").toLocaleDateString("en-GB",opts)}
 function futureShifts(){const today=new Date().toISOString().slice(0,10);return shifts.filter(s=>s.shift_date>=today).sort((a,b)=>a.shift_date.localeCompare(b.shift_date)||(a.start_time||"").localeCompare(b.start_time||""))}
@@ -98,8 +140,16 @@ function rotationCard(r){return '<div class="rotation"><h3>'+esc(r.specialty)+'<
 function renderRotations(){$("content").innerHTML='<div class="section-head" style="margin-top:0"><div><h2>Manage your rotations</h2><div class="small muted">Each rota import belongs to one rotation.</div></div><button class="btn" onclick="openRotation()">+ New rotation</button></div>'+(rotations.length?'<div class="rotation-list">'+rotations.map(rotationCard).join("")+'</div>':'<div class="empty"><div class="emoji">◫</div><h2>No rotations yet</h2><p class="muted">Create a rotation to begin. You can add your rota afterwards.</p><button class="btn" onclick="openRotation()">Create rotation</button></div>')}
 function renderRota(){if(!rotations.length){$("content").innerHTML='<div class="empty"><h2>Create a rotation first</h2><p class="muted">Your shifts will appear here after you create a rotation and import a rota.</p><button class="btn" onclick="navigate(\'rotations\')">Create rotation</button></div>';return}const y=monthCursor.getFullYear(),m=monthCursor.getMonth(),first=new Date(y,m,1),days=new Date(y,m+1,0).getDate(),offset=(first.getDay()+6)%7;let cells="";for(let i=0;i<offset;i++)cells+='<div></div>';for(let d=1;d<=days;d++){const date=y+"-"+String(m+1).padStart(2,"0")+"-"+String(d).padStart(2,"0"),ss=shifts.filter(s=>s.shift_date===date);cells+='<div class="cal-day '+(date===new Date().toISOString().slice(0,10)?"today":"")+'"><b>'+d+'</b>'+ss.map(s=>'<span class="cal-shift" title="'+esc(s.shift_type)+'" onclick="openShift(\''+s.id+'\')">'+esc(s.shift_type)+'</span>').join("")+'</div>'}$("content").innerHTML='<div class="toolbar"><button class="btn secondary" onclick="monthMove(-1)">←</button><b>'+monthCursor.toLocaleDateString("en-GB",{month:"long",year:"numeric"})+'</b><button class="btn secondary" onclick="monthMove(1)">→</button><span class="muted small">'+shifts.length+' shifts</span><span style="flex:1"></span><button class="btn secondary" onclick="openShiftForm(\'\')">+ Add shift</button><button class="btn" onclick="openImport(\''+rotations[0].id+'\')">Upload rota</button></div><div class="card" style="margin-top:15px"><div class="calendar">'+["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(d=>'<div class="cal-head">'+d+'</div>').join("")+cells+'</div></div><div class="section-head"><h2>All shifts</h2><span class="small muted">Select a shift to view notes</span></div><div class="shift-list">'+(shifts.map(shiftCard).join("")||'<div class="card muted">No shifts imported yet.</div>')+'</div>'}
 function monthMove(n){monthCursor.setMonth(monthCursor.getMonth()+n);renderRota()}
-function renderProfile(){$("content").innerHTML='<div class="card profile-grid"><h2 style="margin-top:0">Your profile</h2><p class="muted small">Your rota matching name is used to identify your assignments in a team rota. Use the exact name shown on your rota.</p><div class="field"><label>Full name</label><input id="profileName" value="'+esc(profile?.full_name)+'"></div><div class="field"><label>Name as shown on your rota</label><input id="matchingName" value="'+esc(profile?.rota_matching_name)+'" placeholder="e.g. Jane Smith Doe"><small>Enter the name your hospital uses on the rota. This helps ShiftMate identify your shifts, even if your profile uses a shorter name.</small></div><div class="field"><label>Email address</label><input disabled value="'+esc(user.email)+'"></div><div class="field"><label>Time zone</label><select id="timezone"><option value="Europe/London">Europe/London</option><option value="Europe/Malta">Europe/Malta</option><option value="Europe/Dublin">Europe/Dublin</option></select></div><button class="btn" onclick="saveProfile()">Save profile</button><div id="profileMessage" class="notice hidden"></div></div>';$("timezone").value=profile?.timezone||"Europe/London"}
-async function saveProfile(){const x=await sb.from("profiles").update({full_name:$("profileName").value.trim(),rota_matching_name:$("matchingName").value.trim(),timezone:$("timezone").value,updated_at:new Date().toISOString()}).eq("id",user.id);if(x.error)return alert(x.error.message);await loadData();msg("profileMessage","Profile saved.")}
+function renderProfile(){
+ const prefs={enabled:true,before:true,mid:true,after:true,advance_minutes:60,...(profile?.shift_moments_settings||{})};
+ $("content").innerHTML='<div class="card profile-grid"><h2 style="margin-top:0">Your profile</h2><p class="muted small">Your rota matching name is used to identify your assignments in a team rota. Use the exact name shown on your rota.</p><div class="field"><label>Full name</label><input id="profileName" value="'+esc(profile?.full_name)+'"></div><div class="field"><label>Name as shown on your rota</label><input id="matchingName" value="'+esc(profile?.rota_matching_name)+'" placeholder="e.g. Jane Smith Doe"><small>Enter the name your hospital uses on the rota.</small></div><div class="field"><label>Email address</label><input disabled value="'+esc(user.email)+'"></div><div class="field"><label>Time zone</label><select id="timezone"><option value="Europe/London">Europe/London</option><option value="Europe/Malta">Europe/Malta</option><option value="Europe/Dublin">Europe/Dublin</option></select></div><hr><div class="moments-settings"><div class="home-kicker">SHIFTMATE MOMENTS</div><h2>Motivation throughout your shift</h2><p class="muted small">Receive a little encouragement before, during and after each confirmed shift. Notifications are scheduled from the shift times in your rota.</p><label class="moments-toggle"><span><strong>Enable ShiftMate Moments</strong><small>Master notification setting</small></span><input id="momentsEnabled" type="checkbox" '+(prefs.enabled?'checked':'')+'></label><label class="moments-toggle"><span><strong>Before your shift</strong><small>Personal encouragement before you start</small></span><input id="momentsBefore" type="checkbox" '+(prefs.before?'checked':'')+'></label><label class="moments-toggle"><span><strong>Mid-shift</strong><small>Encouragement halfway through your shift</small></span><input id="momentsMid" type="checkbox" '+(prefs.mid?'checked':'')+'></label><label class="moments-toggle"><span><strong>After your shift</strong><small>A moment to recognise your effort and rest</small></span><input id="momentsAfter" type="checkbox" '+(prefs.after?'checked':'')+'></label><div class="field"><label>Before-shift notification timing</label><select id="momentsAdvance"><option value="15">15 minutes before</option><option value="30">30 minutes before</option><option value="60">60 minutes before</option></select></div><p class="muted small">Notifications require permission on your device. Native scheduled notifications work when the app is closed; browser notifications may require ShiftMate to remain open.</p></div><button class="btn" onclick="saveProfile()">Save settings</button><div id="profileMessage" class="notice hidden"></div></div>';
+ $("timezone").value=profile?.timezone||"Europe/London";$("momentsAdvance").value=String(prefs.advance_minutes||60);
+}
+async function saveProfile(){
+ const prefs={enabled:$("momentsEnabled").checked,before:$("momentsBefore").checked,mid:$("momentsMid").checked,after:$("momentsAfter").checked,advance_minutes:Number($("momentsAdvance").value)};
+ const x=await sb.from("profiles").update({full_name:$("profileName").value.trim(),rota_matching_name:$("matchingName").value.trim(),timezone:$("timezone").value,shift_moments_settings:prefs,updated_at:new Date().toISOString()}).eq("id",user.id);
+ if(x.error)return alert(x.error.message);await loadData();await scheduleShiftMoments();msg("profileMessage","Profile and ShiftMate Moments settings saved.");
+}
 function modal(title,body,actions){$("modalRoot").innerHTML='<div class="modal-back" onclick="if(event.target===this)closeModal()"><div class="modal"><div class="modal-head"><h2>'+title+'</h2><button class="close" onclick="closeModal()">×</button></div>'+body+'<div class="modal-actions">'+actions+'</div></div></div>'}
 function closeModal(){$("modalRoot").innerHTML=""}
 function openRotation(r){const edit=!!r;modal(edit?"Edit rotation":"Create a rotation",'<div class="field"><label>Specialty / department</label><input id="rotSpecialty" placeholder="e.g. General Surgery" value="'+esc(r?.specialty||"")+'"></div><div class="field"><label>Grade (optional)</label><input id="rotGrade" placeholder="e.g. FY1" value="'+esc(r?.grade||"")+'"></div><div class="field"><label>Start date</label><input id="rotStart" type="date" value="'+(r?.start_date||"")+'"></div><div class="field"><label>End date</label><input id="rotEnd" type="date" value="'+(r?.end_date||"")+'"></div><div class="small muted">You can upload a rota after saving this rotation.</div>','<button class="btn secondary" onclick="closeModal()">Cancel</button><button class="btn" onclick="saveRotation(\''+(r?.id||"")+'\')">Save rotation</button>')}
@@ -305,7 +355,7 @@ async function confirmImport(id){
   const payload=previewShifts.map(x=>({...x,...(mappings[x.shift_type]||{}),start_time:x.start_time||mappings[x.shift_type]?.start_time||null,end_time:x.end_time||mappings[x.shift_type]?.end_time||null}));
   const {data,error}=await sb.rpc("confirm_rota_import",{p_rotation_id:id,p_filename:selectedFile.name,p_shifts:payload});
   if(error)throw error;
-  closeModal();await loadData();navigate("rota");alert("Import complete: "+(data.imported_count||0)+" added/updated, "+(data.duplicate_count||0)+" duplicates skipped.");
+  closeModal();await loadData();await scheduleShiftMoments();navigate("rota");alert("Import complete: "+(data.imported_count||0)+" added/updated, "+(data.duplicate_count||0)+" duplicates skipped.");
  }catch(e){alert("Import failed: "+e.message);btn.disabled=false;btn.textContent="Confirm import"}
 }
 async function openShift(id){const s=shifts.find(x=>x.id===id);if(!s)return;const rot=rotations.find(r=>r.id===s.rotation_id);modal("Shift details",'<div class="notice">'+esc(rot?.specialty||"Rotation")+'</div><h3 style="margin:12px 0 4px">'+esc(s.shift_type)+'</h3><div class="muted">'+fmtDate(s.shift_date)+' · '+(s.start_time?esc(s.start_time.slice(0,5)):"Time not set")+'–'+(s.end_time?esc(s.end_time.slice(0,5)):"Time not set")+'</div><p>'+esc(s.ward||"")+'</p><div class="section-head"><h2>Private notes</h2><span class="small muted">Only you can see these</span></div><div id="notesList">Loading notes…</div><div class="field"><label>Add a note</label><input id="newNote" placeholder="Write a reminder or handover note…"></div><button class="btn" onclick="addNote(\''+id+'\')">Add note</button>','<button class="btn secondary" onclick="closeModal()">Close</button><button class="btn secondary" onclick="openShiftForm(\''+id+'\')">Edit shift</button><button class="btn danger" onclick="deleteShift(\''+id+'\')">Delete shift</button>');await loadNotes(id)}
@@ -327,7 +377,7 @@ async function deleteShift(id){
  if(!confirm("Delete this shift? Its private notes may also be affected."))return;
  const q=await sb.from("shifts").delete().eq("id",id).eq("user_id",user.id);
  if(q.error)return alert("Could not delete shift: "+q.error.message);
- closeModal();await loadData();render();
+ closeModal();await loadData();await scheduleShiftMoments();render();
 }
 async function loadNotes(id){const q=await sb.from("shift_notes").select("*").eq("shift_id",id).eq("user_id",user.id).order("created_at");if(q.error){$("notesList").textContent=q.error.message;return}$("notesList").innerHTML=q.data.length?q.data.map(n=>'<div class="note"><div id="noteText'+n.id+'">'+esc(n.body)+'</div><div class="note-actions"><button class="btn ghost small" onclick="editNote(\''+n.id+'\',\''+id+'\')">Edit</button><button class="btn ghost small" onclick="deleteNote(\''+n.id+'\',\''+id+'\')">Delete</button></div></div>').join(""):'<div class="small muted">No notes yet. Add your first note below.</div>'}
 async function addNote(id){const body=$("newNote").value.trim();if(!body)return;const q=await sb.from("shift_notes").insert({user_id:user.id,shift_id:id,body});if(q.error)return alert(q.error.message);$("newNote").value="";await loadNotes(id)}
