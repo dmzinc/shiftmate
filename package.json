@@ -14,7 +14,8 @@
     "cap:open:ios": "cap open ios",
     "cap:run:android": "cap run android",
     "cap:run:ios": "cap run ios",
-    "cap:doctor": "cap doctor"
+    "cap:doctor": "cap doctor",
+    "test": "node --test"
   },
   "dependencies": {
     "@capacitor/android": "^8.0.0",
