@@ -3,36 +3,32 @@ function motivationLocalDate(){
  const zone=profile?.timezone||"Europe/London";
  try{return new Intl.DateTimeFormat("en-CA",{timeZone:zone,year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date())}catch{return new Date().toISOString().slice(0,10)}
 }
-function motivationCard(){return '<section class="home-motivation"><div class="home-motivation-head"><div><div class="home-kicker">A LITTLE MOTIVATION FOR TODAY</div><div class="home-motivation-label">Your daily encouragement ✨</div></div><span class="home-ai-pill">SHIFTMATE AI</span></div><div id="dailyMotivationBody" class="home-motivation-body"><span class="home-motivation-loading">Finding a little encouragement for your day…</span></div></section>'}
-function renderMotivationQuote(motivation,label){const body=$("dailyMotivationBody");if(!body)return;body.innerHTML='<blockquote>'+esc(motivation.quote)+'</blockquote><div class="home-motivation-foot"><span>'+esc(label||"A fresh thought for today")+'</span><span>Made for your journey</span></div>'}
+function motivationCard(){return '<section class="home-motivation"><div class="home-motivation-head"><div><div class="home-kicker">A LITTLE MOTIVATION FOR TODAY</div><div class="home-motivation-label">Your daily encouragement ✨</div></div><span class="home-ai-pill">SHIFTMate MOMENTS</span></div><div id="dailyMotivationBody" class="home-motivation-body"><span class="home-motivation-loading">Finding a little encouragement for your day…</span></div></section>'}
+function renderMotivationQuote(motivation,label){const body=$("dailyMotivationBody");if(!body)return;body.innerHTML='<blockquote>'+esc(motivation.quote)+'</blockquote><div class="home-motivation-foot"><span>'+esc(label||"Your motivation for today")+'</span><span>'+esc(motivation.category||"A little encouragement")+'</span></div>'}
+async function getDailyMotivation(date=motivationLocalDate()){
+ if(!user)throw new Error("Sign in required");
+ const cacheKey="shiftmate:curated-motivation:"+user.id+":"+date;
+ let cached=null;try{cached=JSON.parse(localStorage.getItem(cacheKey)||"null")}catch{}
+ if(cached?.quote)return cached;
+ const {data,error}=await sb.rpc("get_daily_motivation",{p_local_date:date});
+ if(error)throw error;
+ const row=Array.isArray(data)?data[0]:data;
+ if(!row?.quote)throw new Error("No motivation quote returned");
+ const result={quote:row.quote,category:row.category,display_date:row.display_date||date};
+ try{localStorage.setItem(cacheKey,JSON.stringify(result));localStorage.setItem("shiftmate:curated-motivation:"+user.id+":latest",JSON.stringify(result))}catch{}
+ return result;
+}
 async function loadDailyMotivation(){
  if(!user)return;
- const today=motivationLocalDate(),key="shiftmate:motivation:"+user.id+":"+today,latestKey="shiftmate:motivation:"+user.id+":latest",cooldownKey="shiftmate:motivation:cooldown:"+user.id+":"+today;
+ const date=motivationLocalDate(),key="shiftmate:curated-motivation:"+user.id+":"+date,latestKey="shiftmate:curated-motivation:"+user.id+":latest";
  let cached=null,latest=null;try{cached=JSON.parse(localStorage.getItem(key)||"null");latest=JSON.parse(localStorage.getItem(latestKey)||"null")}catch{}
- if(cached){renderMotivationQuote(cached,"Your motivation for today");return}
- if(!navigator.onLine){if(latest)renderMotivationQuote(latest,"Saved inspiration · connect to refresh");else renderMotivationQuote({quote:"Take today one step at a time. Your effort matters, even when progress feels quiet."},"A little encouragement while offline");return}
- if(localStorage.getItem(cooldownKey)==="1"){if(latest)renderMotivationQuote(latest,"Saved inspiration · new message unavailable today");else renderMotivationQuote({quote:"You don’t have to do everything today. Just take the next good step."},"A little encouragement");return}
- const requestKey=user.id+":"+today;
- window.__shiftmateMotivationRequests ||= new Map();
- if(window.__shiftmateMotivationRequests.has(requestKey)){await window.__shiftmateMotivationRequests.get(requestKey);return}
- const body=$("dailyMotivationBody");if(body)body.innerHTML='<span class="home-motivation-loading">Creating a fresh message for you…</span>';
- const request=(async()=>{
-  try{
-   const {data,error}=await sb.functions.invoke("daily-motivation",{body:{}});
-   if(error){const status=error.context?.status||error.status;if(status===429)localStorage.setItem(cooldownKey,"1");throw error}
-   if(!data?.motivation?.quote){if(data?.error?.includes("generation")||data?.error?.includes("try again"))localStorage.setItem(cooldownKey,"1");throw new Error(data?.error||"No motivation was returned")}
-   const record={quote:data.motivation.quote,theme:data.motivation.theme,local_date:data.motivation.local_date};
-   localStorage.setItem(key,JSON.stringify(record));localStorage.setItem(latestKey,JSON.stringify(record));renderMotivationQuote(record,"Your motivation for today");
-  }catch(e){
-   if(latest)renderMotivationQuote(latest,"Saved inspiration · today’s message is unavailable");
-   else renderMotivationQuote({quote:"You don’t have to do everything today. Just take the next good step."},"A little encouragement");
-   console.warn("Daily motivation unavailable:",e?.message||e);
-  }finally{window.__shiftmateMotivationRequests.delete(requestKey)}
- })();
- window.__shiftmateMotivationRequests.set(requestKey,request);
- await request;
+ if(cached?.quote){renderMotivationQuote(cached,"Your motivation for today");return}
+ if(!navigator.onLine){renderMotivationQuote(latest||{quote:"Take today one step at a time. Your effort matters, even when progress feels quiet.",category:"encouragement"},"Saved encouragement · offline");return}
+ try{const quote=await getDailyMotivation(date);renderMotivationQuote(quote,"Your motivation for today")}
+ catch(e){renderMotivationQuote(latest||{quote:"You do not have to do everything today. Just take the next good step.",category:"encouragement"},"A little encouragement");console.warn("Curated motivation unavailable:",e?.message||e)}
 }
 
+let dailyMomentQuote=null;
 const MOMENT_IDS_KEY="shiftmate:moment-notification-ids:";
 function momentId(shiftId,kind){let n=0;for(const c of (shiftId+":"+kind))n=(n*31+c.charCodeAt(0))>>>0;return (n%2000000000)+1}
 function momentDateTime(date,time){if(!date||!time)return null;const d=new Date(date+"T"+String(time).slice(0,8));return Number.isNaN(d.getTime())?null:d}
@@ -42,6 +38,7 @@ async function scheduleShiftMoments(){
  const storeKey=MOMENT_IDS_KEY+user.id;let old=[];try{old=JSON.parse(localStorage.getItem(storeKey)||"[]")}catch{}
  const native=window.Capacitor?.Plugins?.LocalNotifications;
  if(native&&old.length){try{await native.cancel({notifications:old.map(id=>({id}))})}catch(e){console.warn("Could not cancel old ShiftMate Moments",e)}}
+ try{const q=await getDailyMotivation();dailyMomentQuote=q.quote}catch{dailyMomentQuote=null}
  const now=Date.now(),items=[];
  if(prefs.enabled){
   for(const shift of shifts){
@@ -49,9 +46,9 @@ async function scheduleShiftMoments(){
    if(!start||!end)continue;
    if(end<=start)end.setDate(end.getDate()+1);
    const candidates=[
-    {kind:"before",enabled:prefs.before,at:new Date(start.getTime()-Number(prefs.advance_minutes||60)*60000),title:"Your shift is coming up",body:"Take a breath, trust your preparation and step into today one moment at a time."},
-    {kind:"mid",enabled:prefs.mid,at:new Date(start.getTime()+(end.getTime()-start.getTime())/2),title:"A little encouragement",body:"One task at a time. The care and effort you give today matter."},
-    {kind:"after",enabled:prefs.after,at:new Date(end.getTime()),title:"You've made it through",body:"Whatever today brought, you showed up. Give yourself permission to rest."}
+    {kind:"before",enabled:prefs.before,at:new Date(start.getTime()-Number(prefs.advance_minutes||60)*60000),title:"Your shift is coming up",body:dailyMomentQuote||"Take a breath, trust your preparation and step into today one moment at a time."},
+    {kind:"mid",enabled:prefs.mid,at:new Date(start.getTime()+(end.getTime()-start.getTime())/2),title:"A little encouragement",body:dailyMomentQuote||"One task at a time. The care and effort you give today matter."},
+    {kind:"after",enabled:prefs.after,at:new Date(end.getTime()),title:"You've made it through",body:dailyMomentQuote||"Whatever today brought, you showed up. Give yourself permission to rest."}
    ];
    for(const c of candidates){if(c.enabled&&c.at.getTime()>now+30000)items.push({id:momentId(shift.id,c.kind),title:c.title,body:c.body,at:c.at})}
   }
