@@ -27,8 +27,10 @@ function setAuthMode(mode){
  $("authMessage").classList.add("hidden");
 }
 async function submitAuth(){
- const email=$("authEmail").value.trim(),password=$("authPassword").value;
+ const email=$("authEmail").value.trim().toLowerCase(),password=$("authPassword").value;
  if(!email)return msg("authMessage","Enter your email address.",true);
+ const emailPattern=/^[^\\s@]+@[^\\s@]+\\.[A-Za-z]{2,}$/;
+ if(!emailPattern.test(email)||!$("authEmail").checkValidity())return msg("authMessage","Enter a valid email address, for example name@gmail.com or name@nhs.net.",true);
  $("authSubmit").disabled=true;
  try{
   let r;
