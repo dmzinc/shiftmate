@@ -30,6 +30,8 @@ jobs:
           accept-android-sdk-licenses: true
       - name: Install dependencies
         run: npm install
+      - name: Run regression tests
+        run: npm test
       - name: Build mobile web bundle
         run: npm run build:mobile
       - name: Generate Android project
