@@ -81,8 +81,12 @@
     let person = people.find(item => normaliseName(item.name) === key);
     if (!person) { person = { name: clean, assignments: [], ambiguous: false }; people.push(person); }
     if (assignment) person.assignments.push(assignment);
-    if (layout === "staff-in-columns" && person.columnIndex != null) person.ambiguous = true;
-    if (layout === "staff-in-columns") person.columnIndex = assignment && assignment.sourceColumn;
+    if (layout === "staff-in-columns") {
+      const column = assignment && assignment.sourceColumn;
+      person.sourceColumns = person.sourceColumns || [];
+      if (column != null && !person.sourceColumns.includes(column)) person.sourceColumns.push(column);
+      person.ambiguous = person.sourceColumns.length > 1;
+    }
   }
   function parseTabular(grid, header) {
     const people = [];
