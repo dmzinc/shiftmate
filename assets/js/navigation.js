@@ -7,12 +7,30 @@ function motivationCard(){return '<section class="home-motivation"><div class="h
 function renderMotivationQuote(motivation,label){const body=$("dailyMotivationBody");if(!body)return;body.innerHTML='<blockquote>'+esc(motivation.quote)+'</blockquote><div class="home-motivation-foot"><span>'+esc(label||"A fresh thought for today")+'</span><span>Made for your journey</span></div>'}
 async function loadDailyMotivation(){
  if(!user)return;
- const today=motivationLocalDate(),key="shiftmate:motivation:"+user.id+":"+today,latestKey="shiftmate:motivation:"+user.id+":latest";
+ const today=motivationLocalDate(),key="shiftmate:motivation:"+user.id+":"+today,latestKey="shiftmate:motivation:"+user.id+":latest",cooldownKey="shiftmate:motivation:cooldown:"+user.id+":"+today;
  let cached=null,latest=null;try{cached=JSON.parse(localStorage.getItem(key)||"null");latest=JSON.parse(localStorage.getItem(latestKey)||"null")}catch{}
  if(cached){renderMotivationQuote(cached,"Your motivation for today");return}
  if(!navigator.onLine){if(latest)renderMotivationQuote(latest,"Saved inspiration · connect to refresh");else renderMotivationQuote({quote:"Take today one step at a time. Your effort matters, even when progress feels quiet."},"A little encouragement while offline");return}
+ if(localStorage.getItem(cooldownKey)==="1"){if(latest)renderMotivationQuote(latest,"Saved inspiration · new message unavailable today");else renderMotivationQuote({quote:"You don’t have to do everything today. Just take the next good step."},"A little encouragement");return}
+ const requestKey=user.id+":"+today;
+ window.__shiftmateMotivationRequests ||= new Map();
+ if(window.__shiftmateMotivationRequests.has(requestKey)){await window.__shiftmateMotivationRequests.get(requestKey);return}
  const body=$("dailyMotivationBody");if(body)body.innerHTML='<span class="home-motivation-loading">Creating a fresh message for you…</span>';
- try{const {data,error}=await sb.functions.invoke("daily-motivation",{body:{}});if(error)throw error;if(!data?.motivation?.quote)throw new Error(data?.error||"No motivation was returned");const record={quote:data.motivation.quote,theme:data.motivation.theme,local_date:data.motivation.local_date};localStorage.setItem(key,JSON.stringify(record));localStorage.setItem(latestKey,JSON.stringify(record));renderMotivationQuote(record,"Your motivation for today")}catch(e){if(latest)renderMotivationQuote(latest,"Saved inspiration · today’s message is unavailable");else renderMotivationQuote({quote:"You don’t have to do everything today. Just take the next good step."},"A little encouragement");console.warn("Daily motivation unavailable:",e?.message||e)}
+ const request=(async()=>{
+  try{
+   const {data,error}=await sb.functions.invoke("daily-motivation",{body:{}});
+   if(error){const status=error.context?.status||error.status;if(status===429)localStorage.setItem(cooldownKey,"1");throw error}
+   if(!data?.motivation?.quote){if(data?.error?.includes("generation")||data?.error?.includes("try again"))localStorage.setItem(cooldownKey,"1");throw new Error(data?.error||"No motivation was returned")}
+   const record={quote:data.motivation.quote,theme:data.motivation.theme,local_date:data.motivation.local_date};
+   localStorage.setItem(key,JSON.stringify(record));localStorage.setItem(latestKey,JSON.stringify(record));renderMotivationQuote(record,"Your motivation for today");
+  }catch(e){
+   if(latest)renderMotivationQuote(latest,"Saved inspiration · today’s message is unavailable");
+   else renderMotivationQuote({quote:"You don’t have to do everything today. Just take the next good step."},"A little encouragement");
+   console.warn("Daily motivation unavailable:",e?.message||e);
+  }finally{window.__shiftmateMotivationRequests.delete(requestKey)}
+ })();
+ window.__shiftmateMotivationRequests.set(requestKey,request);
+ await request;
 }
 
 const MOMENT_IDS_KEY="shiftmate:moment-notification-ids:";
