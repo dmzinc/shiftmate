@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [master]
   push:
-    branches: [feat/capacitor-retry]
+    branches: [master]
   workflow_dispatch:
 
 permissions:
