@@ -110,8 +110,8 @@ begin
     if found then
       if not (v_shift_id = any(v_seen)) then
         v_seen := array_append(v_seen, v_shift_id);
-        v_duplicates := v_duplicates + 1;
       end if;
+      v_duplicates := v_duplicates + 1;
       continue;
     end if;
 
@@ -123,6 +123,7 @@ begin
       and s.archived = false
       and s.shift_date = v_date
       and s.shift_type = v_type
+      and not (s.id = any(v_seen))
     order by s.created_at
     limit 1
     for update;
