@@ -207,10 +207,10 @@
         if (c === dateColumn.column) continue;
         const candidate = text(row[c]);
         const key = normaliseName(candidate);
-        if (!isLikelyName(candidate) || candidate.split(/\\s+/).length < 2 || excluded.has(key)) continue;
+        if (!isLikelyName(candidate) || candidate.split(/\s+/).length < 2 || excluded.has(key)) continue;
         // Avoid interpreting percentages/allocations as part of a name. Keep
         // the visible staff name intact only when it is a plausible name cell.
-        const name = candidate.replace(/\\s+\\d+(?:\\.\\d+)?%$/, "").trim();
+        const name = candidate.replace(/\s+\d+(?:\.\d+)?%$/, "").trim();
         if (!isLikelyName(name) || name.split(/\\s+/).length < 2) continue;
         addPerson(people, name, {
           shift_date: item.date,
