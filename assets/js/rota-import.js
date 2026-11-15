@@ -30,8 +30,8 @@ function renderImportPreview(sheet, person) {
   $("previewArea").innerHTML =
     '<div class="notice success">Matched the exact rota name <b>' + esc(person.name) + '</b>. ' +
     previewShifts.length + ' assignment(s) found; ' + unique.duplicateCount + ' duplicate row(s) removed.</div>' +
-    '<div class="small muted" style="margin:10px 0">Selected rotation: <b>' + esc(rotations.find(item => item.id === rotaImportState.rotationId)?.specialty || "Selected rotation") +
-    '</b> · Replacement range: <b>' + esc(rangeText) + '</b></div>' +
+    '<div class="small muted" style="margin:10px 0">Selected rotation: <b>' + esc(rotations.find(item => item.id === rotaImportState.rotationId)?.specialty || "Selected rotation") + '</b></div>' +
+    '<div class="grid" style="grid-template-columns:1fr 1fr;gap:10px"><div class="field"><label for="replaceStart">Replace shifts from</label><input id="replaceStart" type="date" value="' + esc(dates[0]) + '" required></div><div class="field"><label for="replaceEnd">Replace shifts to</label><input id="replaceEnd" type="date" value="' + esc(dates[dates.length - 1]) + '" required></div></div>' +
     '<p class="small muted">Review every assignment. Date, shift type, start time, end time and ward are all required. ShiftMate will not guess missing values.</p>' +
     '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;min-width:760px"><thead><tr><th>Date</th><th>Shift type / code</th><th>Start</th><th>End</th><th>Ward</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
   msg("importFeedback", "Review your personal assignments before confirming the import.");
@@ -44,7 +44,8 @@ function onRotaSheetChange() {
   $("confirmImport").disabled = true;
   const input = $("rotaSheetName");
   if (input) input.value = "";
-  $("previewArea").innerHTML = '<div class="field"><label for="rotaSheetName">Your name as it appears on this rota</label><input id="rotaSheetName" autocomplete="off" placeholder="e.g. A.O Oguntuase or Afolabi Olubukola Oguntuase" maxlength="180" required><small>Enter the exact name used on this worksheet. This may differ from your ShiftMate profile name.</small></div><button type="button" class="btn secondary" onclick="matchRotaName()">Find my shifts</button>';
+  const sheets = rotaImportState.sheets;
+  $("previewArea").innerHTML = '<div class="field"><label for="rotaSheetChoice">Worksheet</label><select id="rotaSheetChoice" onchange="onRotaSheetChange()">' + sheets.map(item => '<option value="' + esc(item.name) + '" ' + (item.name === rotaImportState.sheets.find(s => s.name === $("rotaSheetChoice")?.value)?.name ? "selected" : "") + '>' + esc(item.name) + '</option>').join("") + '</select></div><div class="field"><label for="rotaSheetName">Your name as it appears on this rota</label><input id="rotaSheetName" autocomplete="off" placeholder="e.g. A.O Oguntuase or Afolabi Olubukola Oguntuase" maxlength="180" required><small>Enter the exact name used on this worksheet. This may differ from your ShiftMate profile name.</small></div><button type="button" class="btn secondary" onclick="matchRotaName()">Find my shifts</button>';
   msg("importFeedback", "Enter your name exactly as it appears on the selected worksheet.");
 }
 
@@ -117,6 +118,11 @@ async function confirmImport(id) {
   button.disabled = true;
   button.textContent = "Validating…";
   try {
+    const replaceStart = $("replaceStart")?.value || "";
+    const replaceEnd = $("replaceEnd")?.value || "";
+    if (!RotaImportCore.validDate(replaceStart) || !RotaImportCore.validDate(replaceEnd) || replaceEnd < replaceStart) {
+      throw new Error("Choose a valid replacement date range.");
+    }
     const payload = previewShifts.map((item, index) => {
       const date = $("importDate" + index)?.value || "";
       const type = String($("importType" + index)?.value || "").trim();
@@ -124,6 +130,7 @@ async function confirmImport(id) {
       const end = $("importEnd" + index)?.value || "";
       const ward = String($("importWard" + index)?.value || "").trim();
       if (!RotaImportCore.validDate(date)) throw new Error("Assignment " + (index + 1) + " has an invalid date.");
+      if (date < replaceStart || date > replaceEnd) throw new Error("Assignment " + (index + 1) + " falls outside the selected replacement date range.");
       if (!type) throw new Error("Enter a shift type for assignment " + (index + 1) + ".");
       if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(start) || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(end)) {
         throw new Error("Enter valid start and end times for assignment " + (index + 1) + ".");
@@ -137,7 +144,9 @@ async function confirmImport(id) {
     const { data, error } = await sb.rpc("confirm_rota_import", {
       p_rotation_id: id,
       p_filename: selectedFile.name,
-      p_shifts: unique.assignments
+      p_shifts: unique.assignments,
+      p_replace_start_date: replaceStart,
+      p_replace_end_date: replaceEnd
     });
     if (error) throw error;
     closeModal();
