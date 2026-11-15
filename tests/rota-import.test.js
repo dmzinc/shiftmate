@@ -52,8 +52,8 @@ test('parses dates across columns and extracts only the explicitly matched staff
   assert.equal(sheet.layout, 'dates-across-columns');
   const match = api.matchPerson(sheet, 'A.O Oguntuase');
   assert.equal(match.status, 'matched');
-  assert.deepEqual(Array.from(match.person.assignments, item => item.shift_type), ['LD', 'N']);
-  assert.deepEqual(Array.from(match.person.assignments, item => item.shift_date), ['2026-11-15', '2026-11-16']);
+  assert.equal(JSON.stringify(match.person.assignments.map(item => item.shift_type)), JSON.stringify(['LD', 'N']));
+  assert.equal(JSON.stringify(match.person.assignments.map(item => item.shift_date)), JSON.stringify(['2026-11-15', '2026-11-16']));
 });
 
 test('parses staff names in columns against dates down rows', () => {
@@ -67,7 +67,7 @@ test('parses staff names in columns against dates down rows', () => {
   assert.equal(sheet.layout, 'staff-in-columns');
   const match = api.matchPerson(sheet, 'A.O Oguntuase');
   assert.equal(match.status, 'matched');
-  assert.deepEqual(match.person.assignments.map(item => item.shift_type), ['LD', 'N']);
+  assert.equal(JSON.stringify(match.person.assignments.map(item => item.shift_type)), JSON.stringify(['LD', 'N']));
 });
 
 test('deduplicates exact duplicate assignments without merging different shifts', () => {
