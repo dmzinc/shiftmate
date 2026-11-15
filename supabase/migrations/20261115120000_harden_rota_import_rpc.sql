@@ -42,8 +42,10 @@ begin
     raise exception 'Invalid replacement date range';
   end if;
 
-  if jsonb_typeof(p_shifts) is distinct from 'array'
-     or jsonb_array_length(p_shifts) = 0 then
+  if jsonb_typeof(p_shifts) is distinct from 'array' then
+    raise exception 'Shifts must be supplied as an array';
+  end if;
+  if jsonb_array_length(p_shifts) = 0 then
     raise exception 'No shifts supplied';
   end if;
 
