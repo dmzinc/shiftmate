@@ -6,8 +6,18 @@ function setAuthMode(mode){
  $("nameField").classList.toggle("hidden",!signup);
  $("rotaNameField").classList.toggle("hidden",!signup);
  $("organisationField").classList.toggle("hidden",!signup);
+ $("authName").required=signup;
+ $("authRotaName").required=signup;
  $("authOrganisation").required=signup;
+ $("authEmail").required=true;
+ $("authPassword").required=!forgot;
+ $("authPassword").minLength=(signup||reset)?8:0;
+ $("authPasswordConfirm").required=reset;
  $("authOrganisation").setAttribute("aria-required",signup?"true":"false");
+ $("authName").setAttribute("aria-required",signup?"true":"false");
+ $("authRotaName").setAttribute("aria-required",signup?"true":"false");
+ $("authEmail").setAttribute("aria-required","true");
+ $("authPassword").setAttribute("aria-required",forgot?"false":"true");
  $("passwordField").classList.toggle("hidden",forgot);
  $("confirmPasswordField").classList.toggle("hidden",!reset);
  $("forgotWrap").classList.toggle("hidden",signup||forgot||reset);
@@ -39,11 +49,13 @@ async function submitAuth(){
    return;
   }
   if(!password)return msg("authMessage","Enter your password.",true);
+  if(authMode==="signup"&&password.length<8)throw Error("Your password must be at least 8 characters.");
   if(authMode==="signup"){
    const full_name=$("authName").value.trim();
    const rota_matching_name=$("authRotaName").value.trim();
    const organisation_name=$("authOrganisation").value.trim();
    if(!full_name)throw Error("Enter your full name.");
+   if(full_name.length<2)throw Error("Enter your full name.");
    if(!rota_matching_name)throw Error("Enter your name exactly as it appears on your rota.");
    if(!organisation_name)throw Error("Enter the NHS Trust or healthcare organisation you work for.");
    r=await sb.auth.signUp({email,password,options:{data:{full_name,rota_matching_name,organisation_name},emailRedirectTo:"https://shiftmate-preview.onrender.com/"}});
