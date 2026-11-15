@@ -30,6 +30,8 @@ jobs:
           accept-android-sdk-licenses: true
       - name: Install dependencies
         run: npm install
+      - name: Run regression tests
+        run: npm test
       - name: Build mobile web bundle
         run: npm run build:mobile
       - name: Generate Android project
@@ -71,3 +73,13 @@ jobs:
             -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath build/DerivedData \
             CODE_SIGNING_ALLOWED=NO build
+      - name: Package iOS simulator app
+        run: |
+          mkdir -p build
+          ditto -c -k --sequesterRsrc --keepParent build/DerivedData/Build/Products/Debug-iphonesimulator/App.app build/shiftmate-ios-simulator.zip
+          test -s build/shiftmate-ios-simulator.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shiftmate-ios-simulator
+          path: build/shiftmate-ios-simulator.zip
+          if-no-files-found: error

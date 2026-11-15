@@ -1,6 +1,6 @@
 function norm(v){return String(v??"").toLowerCase().replace(/\s+/g," ").trim()}
 function cellDate(v){if(v instanceof Date)return v.toISOString().slice(0,10);if(typeof v==="number"){const d=XLSX.SSF.parse_date_code(v);if(d)return d.y+"-"+String(d.m).padStart(2,"0")+"-"+String(d.d).padStart(2,"0")}const s=String(v??"").trim();if(/^\d{4}-\d{2}-\d{2}/.test(s))return s.slice(0,10);const m=s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})$/);if(m){let y=+m[3];if(y<100)y+=2000;return y+"-"+String(+m[2]).padStart(2,"0")+"-"+String(+m[1]).padStart(2,"0")}return ""}
-function timeVal(v){if(typeof v==="number"){const mins=Math.round(v*1440)%1440;return String(Math.floor(mins/60)).padStart(2,"0")+":"+String(mins%60).padStart(2,"0")+":00"}let s=String(v??"").trim();const m=s.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);if(!m)return "";return String(+m[1]).padStart(2,"0")+":"+m[2]+":00"}
+function timeVal(v){if(typeof v==="number"){if(!Number.isFinite(v)||v<0||v>=1)return "";const mins=Math.round(v*1440)%1440;return String(Math.floor(mins/60)).padStart(2,"0")+":"+String(mins%60).padStart(2,"0")+":00"}let s=String(v??"").trim();const m=s.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);if(!m)return "";const hours=Number(m[1]),minutes=Number(m[2]);if(hours>23||minutes>59)return "";return String(hours).padStart(2,"0")+":"+m[2]+":00"}
 function parseClockRange(value){
  const text=String(value??"").replace(/\s+/g," ").trim();
  const m=text.match(/(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*[-–to]+\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)/i);
