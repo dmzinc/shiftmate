@@ -1,5 +1,5 @@
 async function resolveOrganisation(name){
- const clean=String(name||"").trim().replace(/\\s+/g," ");
+ const clean=String(name||"").trim().replace(/\s+/g," ");
  if(!clean)throw new Error("Enter your NHS Trust or healthcare organisation.");
  if(clean.length<2||clean.length>180)throw new Error("Organisation name must be between 2 and 180 characters.");
  const {data:existing,error:lookupError}=await sb.from("organisations").select("id,name").ilike("name",clean).limit(1);
