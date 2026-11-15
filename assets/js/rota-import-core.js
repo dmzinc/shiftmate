@@ -96,7 +96,9 @@
       const name = text(row[c.name]);
       const date = dateValue(row[c.date]);
       const shift = text(row[c.type]);
-      if (!name || !date || ignored.has(shift.toLowerCase())) continue;
+      if (!name || !date) continue;
+      addPerson(people, name, null, "staff-in-rows");
+      if (ignored.has(shift.toLowerCase())) continue;
       const range = clockRange(shift);
       const start = c.start >= 0 ? timeValue(row[c.start]) : "";
       const end = c.end >= 0 ? timeValue(row[c.end]) : "";
@@ -152,6 +154,7 @@
     for (let r = dateRow.row + 1; r < grid.length; r++) {
       const name = text(grid[r][nameColumn]);
       if (!isLikelyName(name)) continue;
+      addPerson(people, name, null, "dates-across-columns");
       for (const item of dateRow.dates) {
         const raw = text(grid[r][item.column]);
         if (ignored.has(raw.toLowerCase())) continue;
@@ -175,6 +178,7 @@
         if (isLikelyName(candidate) && candidate.split(/\s+/).length >= 2) { name = candidate; }
       }
       if (!name) continue;
+      addPerson(people, name, { sourceColumn: c }, "staff-in-columns");
       for (const item of dateColumn.dates) {
         const raw = text(grid[item.row] && grid[item.row][c]);
         if (ignored.has(raw.toLowerCase()) || !raw) continue;
