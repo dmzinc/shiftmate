@@ -211,7 +211,7 @@
         // Avoid interpreting percentages/allocations as part of a name. Keep
         // the visible staff name intact only when it is a plausible name cell.
         const name = candidate.replace(/\s+\d+(?:\.\d+)?%$/, "").trim();
-        if (!isLikelyName(name) || name.split(/\\s+/).length < 2) continue;
+        if (!isLikelyName(name) || name.split(/\s+/).length < 2) continue;
         addPerson(people, name, {
           shift_date: item.date,
           shift_type: "Scheduled",
