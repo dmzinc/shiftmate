@@ -75,9 +75,9 @@ jobs:
             CODE_SIGNING_ALLOWED=NO build
       - name: Package iOS simulator app
         run: |
-          ditto -c -k --sequesterRsrc --keepParent \\
-            build/DerivedData/Build/Products/Debug-iphonesimulator/App.app \\
-            build/shiftmate-ios-simulator.zip
+          mkdir -p build
+          ditto -c -k --sequesterRsrc --keepParent build/DerivedData/Build/Products/Debug-iphonesimulator/App.app build/shiftmate-ios-simulator.zip
+          test -s build/shiftmate-ios-simulator.zip
       - uses: actions/upload-artifact@v4
         with:
           name: shiftmate-ios-simulator
