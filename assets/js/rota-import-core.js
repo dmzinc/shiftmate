@@ -1,7 +1,7 @@
 /* Pure rota workbook inspection and extraction. The user's per-import name is
  * matched exactly after case/whitespace normalisation; no fuzzy matching. */
 (function (root) {
-  const ignored = new Set(["", "off", "0ff", "al", "a/l", "sl", "s/l", "annual leave", "study leave", "sick leave", "rest", "nil", "none", "bank holiday", "bh", "b/h", "day", "night", "weekend", "weekday"]);
+  const ignored = new Set(["", "off", "0ff", "al", "a/l", "sl", "s/l", "annual leave", "study leave", "sick leave", "rest", "nil", "none", "bank holiday", "bh", "b/h"]);
   const headerAliases = {
     name: ["name", "staff", "staff name", "employee", "employee name", "doctor", "doctor name", "person", "staff member"],
     date: ["date", "shift date", "day", "duty date"],
