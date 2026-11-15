@@ -85,3 +85,31 @@ test('validates calendar dates and parses time ranges', () => {
   assert.deepEqual(JSON.parse(JSON.stringify(api.clockRange('7am to 7pm'))),
     { start: '07:00:00', end: '19:00:00' });
 });
+
+
+test('rejects ambiguous duplicate staff names instead of combining columns', () => {
+  const grid = [
+    ['Date', 'Alex Smith', 'Alex Smith'],
+    ['15/11/2026', 'LD', 'N'],
+    ['16/11/2026', 'N', 'LD']
+  ];
+  const sheet = api.inspectGrid('Team', grid);
+  assert.equal(api.matchPerson(sheet, 'Alex Smith').status, 'ambiguous');
+});
+
+test('does not treat non-working codes as worked assignments', () => {
+  const grid = [
+    ['Staff Name', '15/11/2026', '16/11/2026'],
+    ['A.O Oguntuase', 'OFF', 'AL']
+  ];
+  const sheet = api.inspectGrid('November', grid);
+  assert.equal(api.matchPerson(sheet, 'A.O Oguntuase').person.assignments.length, 0);
+});
+
+test('per-import name is never inferred from the profile name', async () => {
+  const importer = await readFile(new URL('../assets/js/rota-import.js', import.meta.url), 'utf8');
+  assert.match(importer, /Your name as it appears on this rota/);
+  assert.match(importer, /matchRotaName\(\)/);
+  assert.match(importer, /p_replace_start_date: replaceStart/);
+  assert.match(importer, /p_replace_end_date: replaceEnd/);
+});
