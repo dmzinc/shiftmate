@@ -151,6 +151,29 @@ function buildSelectedRotaPreviewFor(sheetName,person){
  $("previewArea").innerHTML='<div class="field"><label>Worksheet</label><select id="rotaSheetChoice" onchange="onRotaChoiceChange()">'+state.sheets.map(x=>'<option value="'+esc(x.name)+'" '+(x.name===sheetName?'selected':'')+'>'+esc(x.name)+'</option>').join("")+'</select></div><div class="field"><label>Doctor / staff member</label><select id="rotaPersonChoice" onchange="onRotaChoiceChange()"><option value="" disabled '+(person?'':'selected')+'>Select staff member</option>'+sheet.people.map(x=>'<option value="'+esc(x[0])+'" '+(x[0]===person?'selected':'')+'>'+esc(x[0])+'</option>').join("")+'</select></div>';
  buildSelectedRotaPreview();
 }
+async function matchRotaName(){
+ const state=rotaImportState;if(!state)return;
+ const sheet=state.sheets.find(x=>x.name===$("rotaSheetChoice")?.value);
+ const entered=String($("rotaSheetName")?.value||"").trim();
+ const feedback=$("importFeedback");
+ if(!sheet)return;
+ if(!entered){feedback.classList.remove("hidden","success");feedback.classList.add("error");feedback.textContent="Enter your name exactly as it appears on the selected rota worksheet.";return}
+ const exact=sheet.people.filter(([name])=>normalName(name)===normalName(entered));
+ let matches=exact;
+ if(!matches.length){
+  const scored=sheet.people.map(([name])=>({name,score:rotaNameScore(name,entered)})).filter(x=>x.score>0);
+  const best=Math.max(0,...scored.map(x=>x.score));
+  matches=scored.filter(x=>x.score===best).map(x=>[x.name]);
+ }
+ if(matches.length!==1){
+  feedback.classList.remove("hidden","success");feedback.classList.add("error");
+  feedback.textContent=matches.length?"More than one possible match was found. Please enter the full name exactly as it appears on the rota.":"No matching staff name was found on this worksheet. Check the spelling or select another worksheet.";
+  return;
+ }
+ feedback.classList.remove("error","hidden");feedback.classList.add("success");
+ feedback.textContent="Matched your entered name to "+matches[0][0]+". Review the shifts below before importing.";
+ buildSelectedRotaPreviewFor(sheet.name,matches[0][0]);
+}
 async function readRotaFile(rotationId,file){
  if(!file)return;
  const feedback=$("importFeedback");feedback.classList.remove("hidden","error","success");feedback.textContent="Inspecting worksheets and staff assignments…";
@@ -161,26 +184,10 @@ async function readRotaFile(rotationId,file){
   const wb=file.name.toLowerCase().endsWith(".csv")?XLSX.read(new TextDecoder().decode(buf),{type:"string",cellDates:true}):XLSX.read(buf,{type:"array",cellDates:true});
   const sheets=inspectRotaWorkbook(wb);
   if(!sheets.length)throw Error("No worksheets with dated rows were detected. Please check that the workbook contains real Excel dates.");
-  const target=normalName(profile.rota_matching_name||profile.full_name||"");
-  rotaImportState={sheets,file,rotationId};
-  let selectedSheet=null,selectedPerson=null,bestScore=0,bestMatches=[];
-  for(const sh of sheets)for(const [person] of sh.people){
-   const score=rotaNameScore(person,target);
-   if(score>bestScore){bestScore=score;bestMatches=[{sheet:sh,person}]}
-   else if(score&&score===bestScore)bestMatches.push({sheet:sh,person});
-  }
-  // Only preselect a name when the best match is unambiguous.
-  if(bestMatches.length===1){selectedSheet=bestMatches[0].sheet;selectedPerson=bestMatches[0].person}
-  if(!selectedSheet)selectedSheet=sheets.find(x=>x.people.length)||sheets[0];
-  if(!selectedPerson)selectedPerson="";
-  if(!selectedPerson){
-   feedback.classList.add("error");feedback.textContent="We found dated worksheets but could not identify staff names. Choose a worksheet with staff assignments or add shifts manually.";
-   $("previewArea").innerHTML=sheets.map(x=>'<div class="note small">'+esc(x.name)+' · '+x.dateRows.length+' dated rows · '+x.people.length+' possible names</div>').join("");
-   return;
-  }
-  selectedFile=file;
-  feedback.classList.add("success");feedback.textContent=selectedPerson?"Matched the profile name. Verify the worksheet and doctor below.":"Detected "+sheets.length+" dated worksheet(s). Choose the correct staff member before importing.";
-  buildSelectedRotaPreviewFor(selectedSheet.name,selectedPerson);
+  rotaImportState={sheets,file,rotationId};selectedFile=file;
+  const first=sheets.find(x=>x.people.length)||sheets[0];
+  feedback.classList.add("success");feedback.textContent="File scanned. Select the worksheet and enter your name exactly as it appears on that rota.";
+  $("previewArea").innerHTML='<div class="field"><label>Worksheet</label><select id="rotaSheetChoice">'+sheets.map(x=>'<option value="'+esc(x.name)+'" '+(x.name===first.name?'selected':'')+'>'+esc(x.name)+' · '+x.people.length+' possible names</option>').join("")+'</select></div><div class="field"><label for="rotaSheetName">Your name as it appears on this rota</label><input id="rotaSheetName" autocomplete="off" placeholder="e.g. A.O Oguntuase or Afolabi Olubukola Oguntuase" maxlength="180"><small>This can be different from your ShiftMate profile name. Enter the version used on this specific rota.</small></div><button type="button" class="btn secondary" onclick="matchRotaName()">Find my shifts</button>';
  }catch(e){
   feedback.classList.remove("success");feedback.classList.add("error");feedback.textContent=e.message||"Unable to read this rota file.";
   previewShifts=[];$("confirmImport").disabled=true;
