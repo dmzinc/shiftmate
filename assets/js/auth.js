@@ -5,6 +5,7 @@ function setAuthMode(mode){
  $("tabLogin").classList.toggle("hidden",reset||forgot);$("tabSignup").classList.toggle("hidden",reset||forgot);
  $("nameField").classList.toggle("hidden",!signup);
  $("rotaNameField").classList.toggle("hidden",!signup);
+ $("organisationField").classList.toggle("hidden",!signup);
  $("passwordField").classList.toggle("hidden",forgot);
  $("confirmPasswordField").classList.toggle("hidden",!reset);
  $("forgotWrap").classList.toggle("hidden",signup||forgot||reset);
@@ -39,9 +40,11 @@ async function submitAuth(){
   if(authMode==="signup"){
    const full_name=$("authName").value.trim();
    const rota_matching_name=$("authRotaName").value.trim();
+   const organisation_name=$("authOrganisation").value.trim();
    if(!full_name)throw Error("Enter your full name.");
    if(!rota_matching_name)throw Error("Enter your name exactly as it appears on your rota.");
-   r=await sb.auth.signUp({email,password,options:{data:{full_name,rota_matching_name},emailRedirectTo:"https://shiftmate-preview.onrender.com/"}});
+   if(!organisation_name)throw Error("Enter the NHS Trust or healthcare organisation you work for.");
+   r=await sb.auth.signUp({email,password,options:{data:{full_name,rota_matching_name,organisation_name},emailRedirectTo:"https://shiftmate-preview.onrender.com/"}});
    if(r.error)throw r.error;
    if(!r.data.session){msg("authMessage","Account created. Check your email to verify your address, then sign in.");return}
   }else{
