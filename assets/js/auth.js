@@ -6,6 +6,8 @@ function setAuthMode(mode){
  $("nameField").classList.toggle("hidden",!signup);
  $("rotaNameField").classList.toggle("hidden",!signup);
  $("organisationField").classList.toggle("hidden",!signup);
+ $("authOrganisation").required=signup;
+ $("authOrganisation").setAttribute("aria-required",signup?"true":"false");
  $("passwordField").classList.toggle("hidden",forgot);
  $("confirmPasswordField").classList.toggle("hidden",!reset);
  $("forgotWrap").classList.toggle("hidden",signup||forgot||reset);
