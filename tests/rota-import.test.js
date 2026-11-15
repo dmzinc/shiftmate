@@ -115,3 +115,28 @@ test('per-import name is never inferred from the profile name', async () => {
   assert.match(importer, /p_replace_start_date: replaceStart/);
   assert.match(importer, /p_replace_end_date: replaceEnd/);
 });
+
+test('detects staff names appearing in dated body cells, not only column headers', () => {
+  const grid = [
+    ['Day', 'Date', ''],
+    ['Fri', '12/03/2027', ''],
+    ['Sat', '13/03/2027', 'Itawosim Motunrayo'],
+    ['Sun', '14/03/2027', 'Itawosim Motunrayo'],
+    ['Mon', '15/03/2027', ''],
+    ['Sat', '20/03/2027', 'Allysha Hussain'],
+    ['Sun', '21/03/2027', 'Allysha Hussain'],
+    ['Sat', '27/03/2027', 'Marcus Dimmock 20%'],
+    ['Sun', '28/03/2027', 'Victoria Oluwaseun Sample']
+  ];
+  const sheet = api.inspectGrid('December 2026 - April 2027', grid);
+  const match = api.matchPerson(sheet, 'Allysha Hussain');
+  assert.equal(match.status, 'matched');
+  assert.equal(match.person.assignments.length, 2);
+  assert.deepEqual(JSON.parse(JSON.stringify(match.person.assignments.map(item => item.shift_date))),
+    ['2027-03-20', '2027-03-21']);
+  assert.equal(match.person.assignments[0].shift_type, 'Scheduled');
+  assert.equal(match.person.assignments[0].start_time, '');
+  assert.equal(match.person.assignments[0].end_time, '');
+  assert.equal(match.person.assignments[0].ward, '');
+  assert.equal(api.matchPerson(sheet, 'Marcus Dimmock').status, 'matched');
+});

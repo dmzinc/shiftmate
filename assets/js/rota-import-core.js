@@ -189,6 +189,49 @@
     }
     return people.length ? { layout: "staff-in-columns", people } : null;
   }
+  // Some hospital workbooks store the assigned staff member in the body of
+  // each dated row (e.g. Date | Staff member), rather than in a staff header.
+  // Detect these names as explicit people while leaving unknown shift details
+  // blank for the user to complete in the import preview.
+  function parseNamesInDateRows(grid, dateColumn) {
+    const people = [];
+    const excluded = new Set([
+      "long day", "early shift", "late shift", "night shift", "day shift",
+      "bank holiday", "weekend", "week days", "weekdays", "weekends",
+      "annual leave", "study leave", "sick leave", "maternity leave",
+      "public holiday", "rest day", "on call", "on-call"
+    ]);
+    for (const item of dateColumn.dates) {
+      const row = grid[item.row] || [];
+      for (let c = 0; c < row.length; c++) {
+        if (c === dateColumn.column) continue;
+        const candidate = text(row[c]);
+        const key = normaliseName(candidate);
+        if (!isLikelyName(candidate) || candidate.split(/\s+/).length < 2 || excluded.has(key)) continue;
+        // Avoid interpreting percentages/allocations as part of a name. Keep
+        // the visible staff name intact only when it is a plausible name cell.
+        const name = candidate.replace(/\s+\d+(?:\.\d+)?%$/, "").trim();
+        if (!isLikelyName(name) || name.split(/\s+/).length < 2) continue;
+        addPerson(people, name, {
+          shift_date: item.date,
+          shift_type: "Scheduled",
+          start_time: "",
+          end_time: "",
+          ward: ""
+        }, "date-row-staff-cells");
+      }
+    }
+    return people.length ? people : null;
+  }
+  function mergePeople(target, source) {
+    if (!source) return target;
+    source.forEach(person => {
+      const existing = target.find(item => normaliseName(item.name) === normaliseName(person.name));
+      if (!existing) target.push(person);
+      else if (person.assignments && person.assignments.length) existing.assignments.push(...person.assignments);
+    });
+    return target;
+  }
   function inspectGrid(name, grid) {
     const header = findHeaderColumns(grid);
     let parsed = header ? parseTabular(grid, header) : null;
@@ -198,6 +241,16 @@
       // Date headers across columns and dates down rows are distinct supported layouts.
       if (dateRow && (!dateColumn || dateRow.dates.length >= dateColumn.dates.length)) parsed = parseDatesAcrossColumns(grid, dateRow);
       else if (dateColumn) parsed = parseStaffInColumns(grid, dateColumn);
+      // Supplement column-header parsing with staff names appearing in the
+      // dated body cells. This supports real-world hospital placement rotas.
+      if (dateColumn) {
+        const bodyPeople = parseNamesInDateRows(grid, dateColumn);
+        if (bodyPeople) {
+          parsed = parsed || { layout: "date-row-staff-cells", people: [] };
+          parsed.people = mergePeople(parsed.people, bodyPeople);
+          if (parsed.layout === "unsupported") parsed.layout = "date-row-staff-cells";
+        }
+      }
     }
     return {
       name, grid, layout: parsed?.layout || "unsupported",
