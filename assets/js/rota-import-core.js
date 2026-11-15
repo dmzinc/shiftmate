@@ -80,7 +80,7 @@
     if (!key) return;
     let person = people.find(item => normaliseName(item.name) === key);
     if (!person) { person = { name: clean, assignments: [], ambiguous: false }; people.push(person); }
-    if (assignment) person.assignments.push(assignment);
+    if (assignment && assignment.shift_date) person.assignments.push(assignment);
     if (layout === "staff-in-columns") {
       const column = assignment && assignment.sourceColumn;
       person.sourceColumns = person.sourceColumns || [];
